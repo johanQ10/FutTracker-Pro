@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Procesador de Imágenes WebGPU</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <script src="opencv.js"></script>
+    <script src="canvastobmp.js"></script>
+    <script src="action.js"></script>
+</head>
+<body>
+    <div>
+        <video id="videoInput" width="972" height="648" controls></video>
+        <canvas id="canvasOutput" width="972" height="648"></canvas>
+    </div>
+    <div>
+        <input type="file" id="fileInput" accept="video/*">
+        <div>
+            <label>
+                <input type="radio" name="vista" id="vistaLateral" value="lateral" checked>
+                Lateral
+            </label>
+            <label>
+                <input type="radio" name="vista" id="vistaSuperior" value="superior">
+                Superior
+            </label>
+        </div>
+    </div>
+</body>
+</html>
