@@ -1,3 +1,6 @@
+let playersP1 = new Array(20);
+let playersP2 = new Array(20);
+
 document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('videoInput');
     const canvas = document.getElementById('canvasOutput');
@@ -20,7 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 1. Cargar el video desde el archivo
+    // 1. Load video from file input
     document.getElementById('fileInput').addEventListener('change', (e) => {
         const file = e.target.files[0];
 
@@ -48,95 +51,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
     if (!shouldContinue() || video.paused || video.ended) return;
-    // 2. Capturar el frame actual del video en el canvas
+    // 1. Get current frame from video
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // 3. Convertir el contenido del canvas a una Matriz de OpenCV
+    // 2. Create Mat OpenvCv src and dst
     let src = cv.imread(canvas);
-    let dst = new cv.Mat(); // Aquí guardarás el resultado procesado
-
-    // --- AQUÍ VA TU LÓGICA DE PDI (Procesamiento Digital de Imágenes) ---
-    // Ejemplo: Convertir a escala de grises para detectar bordes
-    // cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-    averageCv(cv, src, dst);
-    umbralGreenCv(cv, src, dst);
-    let vista = document.querySelector('input[name="vista"]:checked').value;
-    console.log(`Vista seleccionada: ${vista}`);
-    contoursCv(cv, src, dst, vista);
-    // -----------------------------------------------------------------
-
-    // 4. Mostrar el resultado en el canvas
+    let dst = new cv.Mat();
+    // 3. Process current frame (image)
+    processImage(src, dst);
+    // 4. Show the result on the canvas
     cv.imshow(canvas, src);
-
-    // 5. Liberar memoria (CRÍTICO en JS para evitar que el navegador explote)
-    // src.delete();
+    // 5. Free memory
     src.delete();
     dst.delete();
-
-    // 6. Llamar al siguiente frame
+    // 6. Call the next frame
     const id = requestAnimationFrame(() => processVideo(video, canvas, ctx, shouldContinue, setAnimationId));
 
     setAnimationId(id);
 }
 
+function processImage(src, dst) {
+    // averageCv(cv, src, dst);
+    umbralGreenCv(cv, src, dst);
+    morfologyCv(cv, dst);
+    maskGreenFieldCv(cv, dst);
+    removeContoursExtrasCv(cv, dst);
+    removeFieldCv(cv, src, dst);
+    // averageCv(cv, dst, dst);
+    // kMeansColorCv(cv, dst);
+    // popularityCv(cv, dst, dst);
 
-function kMeansColorCv(cv, canvas) {
-    let maxIter = 5;
-    let kmeansInput = 8;
-
-    if (kmeansInput === '')
-        kmeansInput = '8';
-        
-    let k = parseInt(kmeansInput);
-
-    let src = cv.imread(canvas);
-    cv.cvtColor(src, src, cv.COLOR_RGBA2RGB, 0);
-
-    let rows = src.rows, cols = src.cols;
-
-    let arr = [];
-
-    for (let i = 0; i < rows; i++) {
-        for (let j = 0; j < cols; j++) {
-            let pixel = src.ucharPtr(i, j);
-            arr.push(pixel[0], pixel[1], pixel[2]);
-        }
-    }
-
-    let matrix = cv.matFromArray(rows * cols, 3, cv.CV_32F, arr);
-    let labels = new cv.Mat();
-    let centers = new cv.Mat();
-
-    cv.kmeans(
-        matrix, k, labels,
-        new cv.TermCriteria(cv.TermCriteria_EPS + cv.TermCriteria_MAX_ITER, maxIter, 1.0),
-        1, cv.KMEANS_RANDOM_CENTERS, centers
-    );
-
-    // Crear la imagen resultante
-    let newImg = new cv.Mat(rows, cols, src.type());
-    let idx = 0;
-
-    for (let i = 0; i < rows; i++) {
-        for (let j = 0; j < cols; j++, idx++) {
-            let centerIdx = labels.intAt(idx, 0);
-            let pixel = newImg.ucharPtr(i, j);
-            pixel[0] = centers.floatAt(centerIdx, 0);
-            pixel[1] = centers.floatAt(centerIdx, 1);
-            pixel[2] = centers.floatAt(centerIdx, 2);
-        }
-    }
-
-    src.delete();
-    matrix.delete();
-    labels.delete();
-    centers.delete();
-    return newImg;
+    // contoursCv(cv, src, dst);
+    dst.copyTo(src);
 }
 
 function averageCv(cv, src, dst) {
-    let ksize = new cv.Size(7, 7);
-    cv.blur(src, dst, ksize, new cv.Point(-1, -1), cv.BORDER_DEFAULT);
-    // cv.medianBlur(src, dst, 3);
+    // cv.blur(src, dst, new cv.Size(7, 7), new cv.Point(-1, -1), cv.BORDER_DEFAULT);
+    cv.medianBlur(src, dst, 3);
 }
 
 function umbralGreenCv(cv, src, dst) {
@@ -150,20 +100,13 @@ function umbralGreenCv(cv, src, dst) {
     let lowerGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [40, 70, 60, 0]);
     let upperGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [75, 255, 255, 255]);
 
-    cv.inRange(hsv, lowerGreen, upperGreen, maskGreen);
-    // Limpieza opcional (reduce ruido)
-    const kernel = cv.Mat.ones(5, 5, cv.CV_8U);
-    cv.morphologyEx(maskGreen, maskGreen, cv.MORPH_OPEN, kernel);
-    cv.morphologyEx(maskGreen, maskGreen, cv.MORPH_CLOSE, kernel);
-
-    cv.bitwise_not(maskGreen, dst);
+    cv.inRange(hsv, lowerGreen, upperGreen, dst);
 
     rgb.delete();
     hsv.delete();
     maskGreen.delete();
     lowerGreen.delete();
     upperGreen.delete();
-    kernel.delete();
 /*
 Guía rápida de ajuste:
 - Si detecta "poco verde": baja S/V mínimo
@@ -176,7 +119,20 @@ Guía rápida de ajuste:
 */
 }
 
-function contoursCv(cv, src, dst, type = 'lateral') {
+function morfologyCv(cv, dst) {
+    const kernel = cv.Mat.ones(5, 5, cv.CV_8U);
+    cv.morphologyEx(dst, dst, cv.MORPH_CLOSE, kernel);
+    cv.morphologyEx(dst, dst, cv.MORPH_OPEN, kernel);
+    kernel.delete();
+}
+
+function maskGreenFieldCv(cv, dst) {
+    cv.bitwise_not(dst, dst);
+}
+
+function removeContoursExtrasCv(cv, dst) {
+    let type = document.querySelector('input[name="vista"]:checked')?.value || 'lateral';
+
     // Pseudocódigo de detección de movimiento/objetos tradicional
     let hsv = new cv.Mat();
 
@@ -186,7 +142,180 @@ function contoursCv(cv, src, dst, type = 'lateral') {
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
     cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-    // Dibujar Bounding Box
+
+    for (let i = 0; i < contours.size(); i++) {
+        let contour = contours.get(i);
+        let rect = cv.boundingRect(contour);
+        let contourArea = cv.contourArea(contour);
+        let rectArea = rect.width * rect.height;
+        let aspectRatio = rect.width / rect.height;
+        let fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
+
+        let isLateral = (type === 'lateral');
+        let condition;
+
+        if (isLateral)
+            condition = ((rect.width * 6) < rect.height) || 
+                ((rect.height * 3) < rect.width) || 
+                (rect.width > 200 || rect.height > 200) ||
+                (rect.height < 12) ||
+                (rectArea < 110) ||
+                (contourArea < 70) ||
+                (fillRatio < 0.26) ||
+                (aspectRatio > 3.2);
+        else 
+            condition = false//(rect.width > 100 || rect.height > 100);
+
+        if (condition)
+            cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
+        else {
+            let point1 = new cv.Point(rect.x, rect.y);
+            let point2 = new cv.Point(rect.x + rect.width, rect.y + rect.height);
+            cv.rectangle(src, point1, point2, [255, 0, 0, 255], 2);
+            point1.delete();
+            point2.delete();
+        }
+    }
+
+    hsv.delete();
+    contours.delete();
+    hierarchy.delete();
+}
+
+function removeFieldCv(cv, src, dst) {
+    let mask = new cv.Mat();
+    cv.bitwise_and(src, src, mask, dst);
+    mask.copyTo(dst);
+    mask.delete();
+}
+
+function kMeansColorCv(cv, dst) {
+    let maxIter = 3;
+    let k = 10;
+
+    cv.cvtColor(dst, dst, cv.COLOR_RGBA2RGB, 0);
+
+    let rows = dst.rows, cols = dst.cols;
+    // let arr = [];
+
+    // for (let i = 0; i < rows; i++) {
+        // for (let j = 0; j < cols; j++) {
+            // let pixel = dst.ucharPtr(i, j);
+            // arr.push(pixel[0], pixel[1], pixel[2]);
+        // }
+    // }
+
+    // let matrix = cv.matFromArray(rows * cols, 3, cv.CV_32F, arr);
+    let samples = cv.matFromArray(rows * cols, 3, cv.CV_8U, dst.data);
+    let matrix = new cv.Mat();
+    samples.convertTo(matrix, cv.CV_32F);
+
+    let labels = new cv.Mat();
+    let centers = new cv.Mat();
+
+    cv.kmeans(
+        matrix,
+        k,
+        labels,
+        new cv.TermCriteria(cv.TermCriteria_EPS + cv.TermCriteria_MAX_ITER, maxIter, 1.0),
+        3,
+        cv.KMEANS_PP_CENTERS,
+        // cv.KMEANS_RANDOM_CENTERS,
+        centers
+    );
+
+    // Crear la imagen resultante
+    let newImg = new cv.Mat(rows, cols, dst.type());
+    // let idx = 0;
+
+    // for (let i = 0; i < rows; i++) {
+        // for (let j = 0; j < cols; j++, idx++) {
+            // let centerIdx = labels.intAt(idx, 0);
+            // let pixel = newImg.ucharPtr(i, j);
+            // pixel[0] = centers.floatAt(centerIdx, 0);
+            // pixel[1] = centers.floatAt(centerIdx, 1);
+            // pixel[2] = centers.floatAt(centerIdx, 2);
+        // }
+    // }
+
+    const labelsData = labels.data32S;     // N labels
+    const centersData = centers.data32F;   // k*3 (RGB)
+    const out = newImg.data;               // Uint8Array, tamaño N*3
+    const total = rows * cols;
+
+    for (let i = 0; i < total; i++) {
+        const c = labelsData[i] * 3;
+        const o = i * 3;
+
+        out[o]     = centersData[c]     | 0;
+        out[o + 1] = centersData[c + 1] | 0;
+        out[o + 2] = centersData[c + 2] | 0;
+    }
+
+    samples.delete();
+    matrix.delete();
+    labels.delete();
+    centers.delete();
+    newImg.copyTo(dst);
+    newImg.delete();
+}
+
+function popularityCv(cv, src, dst) {
+    let popularity = 300;
+
+    cv.cvtColor(src, dst, cv.COLOR_RGBA2RGB, 0);
+
+    let colorMap = new Map();
+
+    for (let i = 0; i < src.rows; i++) {
+        for (let j = 0; j < src.cols; j++) {
+            let pixel = dst.ucharPtr(i, j);
+            let key = `${pixel[0]},${pixel[1]},${pixel[2]}`;
+            colorMap.set(key, (colorMap.get(key) || 0) + 1);
+        }
+    }
+
+    let palette = Array.from(colorMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, popularity)
+        .map(e => e[0].split(',').map(Number));
+
+    for (let i = 0; i < src.rows; i++) {
+        for (let j = 0; j < src.cols; j++) {
+            let pixel = dst.ucharPtr(i, j);
+            let minDist = Infinity, idx = 0;
+
+            for (let k = 0; k < palette.length; k++) {
+                let dr = pixel[0] - palette[k][0];
+                let dg = pixel[1] - palette[k][1];
+                let db = pixel[2] - palette[k][2];
+                let dist = dr * dr + dg * dg + db * db;
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    idx = k;
+                }
+            }
+
+            pixel[0] = palette[idx][0];
+            pixel[1] = palette[idx][1];
+            pixel[2] = palette[idx][2];
+        }
+    }
+}
+
+function contoursCv(cv, src, dst) {
+    let type = document.querySelector('input[name="vista"]:checked')?.value || 'lateral';
+
+    // Pseudocódigo de detección de movimiento/objetos tradicional
+    let hsv = new cv.Mat();
+
+    cv.cvtColor(dst, hsv, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     let sumWidth = 0;
     let sumHeight = 0;
