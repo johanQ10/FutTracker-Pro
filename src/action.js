@@ -1,6 +1,15 @@
 let playersP1 = new Array(20);
 let playersP2 = new Array(20);
 
+let colorR = 0;
+let colorG = 0;
+let colorB = 0;
+let sumColorR = 0;
+let sumColorG = 0;
+let sumColorB = 0;
+let count = 0;
+let first = false;
+
 document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('videoInput');
     const canvas = document.getElementById('canvasOutput');
@@ -74,19 +83,19 @@ function processImage(src, dst) {
     umbralGreenCv(cv, src, dst);
     morfologyCv(cv, dst);
     maskGreenFieldCv(cv, dst);
-    removeContoursExtrasCv(cv, dst);
+    removeContoursExtrasCv(cv, src, dst);
     removeFieldCv(cv, src, dst);
     // averageCv(cv, dst, dst);
     // kMeansColorCv(cv, dst);
     // popularityCv(cv, dst, dst);
 
     // contoursCv(cv, src, dst);
-    dst.copyTo(src);
+    // dst.copyTo(src);
 }
 
 function averageCv(cv, src, dst) {
     // cv.blur(src, dst, new cv.Size(7, 7), new cv.Point(-1, -1), cv.BORDER_DEFAULT);
-    cv.medianBlur(src, dst, 3);
+    cv.medianBlur(src, dst, 7);
 }
 
 function umbralGreenCv(cv, src, dst) {
@@ -130,7 +139,7 @@ function maskGreenFieldCv(cv, dst) {
     cv.bitwise_not(dst, dst);
 }
 
-function removeContoursExtrasCv(cv, dst) {
+function removeContoursExtrasCv(cv, src, dst) {
     let type = document.querySelector('input[name="vista"]:checked')?.value || 'lateral';
 
     // Pseudocódigo de detección de movimiento/objetos tradicional
@@ -164,18 +173,55 @@ function removeContoursExtrasCv(cv, dst) {
                 (fillRatio < 0.26) ||
                 (aspectRatio > 3.2);
         else 
-            condition = false//(rect.width > 100 || rect.height > 100);
+            condition = (rect.width > 100 || rect.height > 100);
 
         if (condition)
             cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
         else {
-            let point1 = new cv.Point(rect.x, rect.y);
-            let point2 = new cv.Point(rect.x + rect.width, rect.y + rect.height);
-            cv.rectangle(src, point1, point2, [255, 0, 0, 255], 2);
-            point1.delete();
-            point2.delete();
+            const offset = 5;
+            let point1 = new cv.Point(rect.x - offset, rect.y - offset);
+            let point2 = new cv.Point(rect.x + rect.width + offset, rect.y + rect.height + offset);
+
+            const mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+            const one = new cv.MatVector();
+            one.push_back(contour);
+
+            cv.drawContours(mask, one, 0, new cv.Scalar(255), cv.FILLED);
+
+            let median = new cv.Mat();
+            // cv.medianBlur(src, median, 3);
+
+            const mean = cv.mean(src, mask);
+            let color;
+
+            if (!first) {
+                color = [mean[0] | 0, mean[1] | 0, mean[2] | 0, 255];
+
+                sumColorR += color[0];
+                sumColorG += color[1];
+                sumColorB += color[2];
+                count++;
+            } else {
+                color = [colorR, colorG, colorB, 255];
+            }
+
+            cv.rectangle(src, point1, point2, color, 4);
+
+            median.delete();
+            one.delete();
+            mask.delete();
         }
+
+        contour.delete();
     }
+
+    if (!first) {
+        colorR = (sumColorR / count) | 0;
+        colorG = (sumColorG / count) | 0;
+        colorB = (sumColorB / count) | 0;
+    }
+
+    // first = true;
 
     hsv.delete();
     contours.delete();
