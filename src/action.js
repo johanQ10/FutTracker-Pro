@@ -1,8 +1,10 @@
 
 let colorA = [ 0, 0, 0, 255 ];
 let colorB = [ 0, 0, 0, 255 ];
+let colorR = [ 0, 0, 0, 255 ];
 let clusterA = -1;
 let clusterB = -1;
+let clusterR = -1;
 let count = 0;
 let first = false;
 
@@ -78,8 +80,10 @@ function reset() {
     isChanged = false;
     colorA = [ 0, 0, 0, 255 ];
     colorB = [ 0, 0, 0, 255 ]; 
+    colorR = [ 0, 0, 0, 255 ];
     clusterA = -1;
     clusterB = -1;
+    clusterR = -1;
     count = 0;
     first = false;
     const canvas = document.getElementById('canvasOutput');
@@ -108,11 +112,10 @@ function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
 }
 
 function processImage(src, dst) {
+    processPlayers(src, dst);
+    // processReferee(src, dst);
+
     // averageCv(cv, src, dst);
-    umbralGreenCv(cv, src, dst);
-    morfologyCv(cv, dst);
-    maskGreenFieldCv(cv, dst);
-    removeContoursExtrasCv(cv, src, dst);
     // removeFieldCv(cv, src, dst);
     // averageCv(cv, dst, dst);
     // kMeansColorCv(cv, dst);
@@ -120,6 +123,13 @@ function processImage(src, dst) {
 
     // contoursCv(cv, src, dst);
     // dst.copyTo(src);
+}
+
+function processPlayers(src, dst) {
+    umbralGreenCv(cv, src, dst);
+    morfologyCv(cv, dst, 5);
+    maskGreenFieldCv(cv, dst);
+    contoursPlayersCv(cv, src, dst);
 }
 
 function averageCv(cv, src, dst) {
@@ -157,8 +167,8 @@ Guía rápida de ajuste:
 */
 }
 
-function morfologyCv(cv, dst) {
-    const kernel = cv.Mat.ones(5, 5, cv.CV_8U);
+function morfologyCv(cv, dst, kernelSize = 5) {
+    const kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
     cv.morphologyEx(dst, dst, cv.MORPH_CLOSE, kernel);
     cv.morphologyEx(dst, dst, cv.MORPH_OPEN, kernel);
     kernel.delete();
@@ -168,9 +178,7 @@ function maskGreenFieldCv(cv, dst) {
     cv.bitwise_not(dst, dst);
 }
 
-function removeContoursExtrasCv(cv, src, dst) {
-    let type = document.querySelector('input[name="vista"]:checked')?.value || 'lateral';
-
+function contoursPlayersCv(cv, src, dst) {
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
     cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -179,27 +187,20 @@ function removeContoursExtrasCv(cv, src, dst) {
 
     for (let i = 0; i < contours.size(); i++) {
         let contour = contours.get(i);
-
         let rect = cv.boundingRect(contour);
         let contourArea = cv.contourArea(contour);
         let rectArea = rect.width * rect.height;
         let aspectRatio = rect.width / rect.height;
         let fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
 
-        let isLateral = (type === 'lateral');
-        let condition;
-
-        if (isLateral)
-            condition = ((rect.width * 6) < rect.height) || 
-                ((rect.height * 3) < rect.width) || 
-                (rect.width > 200 || rect.height > 200) ||
-                (rect.height < 12) ||
-                (rectArea < 110) ||
-                (contourArea < 70) ||
-                (fillRatio < 0.26) ||
-                (aspectRatio > 3.2);
-        else 
-            condition = (rect.width > 100 || rect.height > 100);
+        let condition = ((rect.width * 6) < rect.height) || 
+            ((rect.height * 3) < rect.width) || 
+            (rect.width > 200 || rect.height > 200) ||
+            (rect.height < 12) ||
+            (rectArea < 110) ||
+            (contourArea < 70) ||
+            (fillRatio < 0.26) ||
+            (aspectRatio > 3.2);
 
         if (condition) {
             cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
@@ -299,12 +300,13 @@ function removeContoursExtrasCv(cv, src, dst) {
             let g = centers.floatAt(cluster, 1) | 0;
             let b = centers.floatAt(cluster, 2) | 0;
 
-            let isA = false, isB = false;
+            let isA = false, isB = false, isR = false;
 
             if (first) {
                 const x = [r, g, b];
                 const aC = [colorA[0], colorA[1], colorA[2]];
                 const bC = [colorB[0], colorB[1], colorB[2]];
+                const rC = [colorR[0], colorR[1], colorR[2]];
 
                 if (dist(x, aC) < threshold) {
                     isA = true;
@@ -318,14 +320,21 @@ function removeContoursExtrasCv(cv, src, dst) {
                     g = colorB[1];
                     b = colorB[2];
                 }
+                if (dist(x, rC) < threshold) {
+                    isR = true;
+                    r = colorR[0];
+                    g = colorR[1];
+                    b = colorR[2];
+                }
             }
 
             const solidColor = intensityColorContrast(r, g, b);//[r, g, b, 255]
 
-            cv.rectangle(src, point1, point2, solidColor, 4);
+            if (isA || isB || isR)
+                cv.rectangle(src, point1, point2, solidColor, 4);
 
-            const text = isA ? 'Team A' : isB ? 'Team B' : '';
-            const textOrg = new cv.Point(point1.x, point1.y - 10);
+            const text = isA ? 'Team A' : isB ? 'Team B' : isR ? 'Referee' : '';
+            const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
 
             cv.putText(
                 src,
@@ -366,6 +375,12 @@ function removeContoursExtrasCv(cv, src, dst) {
             colorB[0] = centers.floatAt(centersFreq[1][0], 0) | 0;
             colorB[1] = centers.floatAt(centersFreq[1][0], 1) | 0;
             colorB[2] = centers.floatAt(centersFreq[1][0], 2) | 0;
+
+            clusterR = centersFreq[2][0];
+
+            colorR[0] = centers.floatAt(centersFreq[2][0], 0) | 0;
+            colorR[1] = centers.floatAt(centersFreq[2][0], 1) | 0;
+            colorR[2] = centers.floatAt(centersFreq[2][0], 2) | 0;
         }
 
         first = true;
@@ -465,111 +480,6 @@ function kMeansColorCv(cv, dst) {
     centers.delete();
     newImg.copyTo(dst);
     newImg.delete();
-}
-
-function popularityCv(cv, src, dst) {
-    let popularity = 300;
-
-    cv.cvtColor(src, dst, cv.COLOR_RGBA2RGB, 0);
-
-    let colorMap = new Map();
-
-    for (let i = 0; i < src.rows; i++) {
-        for (let j = 0; j < src.cols; j++) {
-            let pixel = dst.ucharPtr(i, j);
-            let key = `${pixel[0]},${pixel[1]},${pixel[2]}`;
-            colorMap.set(key, (colorMap.get(key) || 0) + 1);
-        }
-    }
-
-    let palette = Array.from(colorMap.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, popularity)
-        .map(e => e[0].split(',').map(Number));
-
-    for (let i = 0; i < src.rows; i++) {
-        for (let j = 0; j < src.cols; j++) {
-            let pixel = dst.ucharPtr(i, j);
-            let minDist = Infinity, idx = 0;
-
-            for (let k = 0; k < palette.length; k++) {
-                let dr = pixel[0] - palette[k][0];
-                let dg = pixel[1] - palette[k][1];
-                let db = pixel[2] - palette[k][2];
-                let dist = dr * dr + dg * dg + db * db;
-
-                if (dist < minDist) {
-                    minDist = dist;
-                    idx = k;
-                }
-            }
-
-            pixel[0] = palette[idx][0];
-            pixel[1] = palette[idx][1];
-            pixel[2] = palette[idx][2];
-        }
-    }
-}
-
-function contoursCv(cv, src, dst) {
-    let type = document.querySelector('input[name="vista"]:checked')?.value || 'lateral';
-
-    // Pseudocódigo de detección de movimiento/objetos tradicional
-    let hsv = new cv.Mat();
-
-    cv.cvtColor(dst, hsv, cv.COLOR_RGBA2RGB);
-    cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
-
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    let sumWidth = 0;
-    let sumHeight = 0;
-    let count = 0;
-
-    for (let i = 0; i < contours.size(); i++) {
-        let contour = contours.get(i);
-        let rect = cv.boundingRect(contour);
-        let contourArea = cv.contourArea(contour);
-        let rectArea = rect.width * rect.height;
-        let aspectRatio = rect.width / rect.height;
-        let fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
-
-        let point1 = new cv.Point(rect.x, rect.y);
-        let point2 = new cv.Point(rect.x + rect.width, rect.y + rect.height);
-
-        let isLateral = (type === 'lateral');
-        let condition;
-
-        if (isLateral)
-            condition = ((rect.width * 6) < rect.height) || 
-                ((rect.height * 3) < rect.width) || 
-                (rect.width > 200 || rect.height > 200) ||
-                (rect.height < 12) ||
-                (rectArea < 110) ||
-                (contourArea < 70) ||
-                (fillRatio < 0.26) ||
-                (aspectRatio > 3.2);
-        else 
-            condition = false//(rect.width > 100 || rect.height > 100);
-
-        if (condition)
-            cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
-        else {
-            sumWidth += rect.width;
-            sumHeight += rect.height;
-            count++;
-            cv.rectangle(src, point1, point2, [255, 0, 0, 255], 2);
-        }
-    }
-
-    hsv.delete();
-    // low.delete();
-    // high.delete();
-    // mask.delete();
-    contours.delete();
-    hierarchy.delete();
 }
 
 // --- Utils --- //
@@ -678,4 +588,28 @@ function mergeSimilarClusters(labels, centers, threshold = 30) {
         mergedCenters, // array JS: [ [r,g,b], ... ]
         mergedK: mergedCenters.length
     };
+}
+
+function isBallCandidate(contour) {
+    const area = cv.contourArea(contour);
+    // Tiny ball in wide shots usually appears as very small blobs.
+    if (area < 4 || area > 180) return false;
+    
+    const peri = cv.arcLength(contour, true);
+    if (peri <= 0) return false;
+    
+    const circularity = (4 * Math.PI * area) / (peri * peri);
+    // Relax circularity for pixelated small contours.
+    if (circularity < 0.35) return false;
+    
+    const r = cv.boundingRect(contour);
+    const ratio = r.width / r.height;
+
+    if (ratio < 0.55 || ratio > 1.8) return false;
+    if (r.width > 24 || r.height > 24) return false;
+
+    // Keep console clean during frame processing.
+    // console.log(`Ball candidate: area=${area.toFixed(2)}, peri=${peri.toFixed(2)}, circularity=${circularity.toFixed(2)}, ratio=${ratio.toFixed(2)}`);
+
+  return true;
 }
