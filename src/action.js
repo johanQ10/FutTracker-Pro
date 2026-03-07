@@ -125,11 +125,19 @@ function processImage(src, dst) {
     // dst.copyTo(src);
 }
 
+function processSteps(step, dst) {
+    const element = document.getElementById(`view-step-${step}`);
+    const canvas = document.getElementById(`canvas-step-${step}`);
+
+    if (element.checked)
+        cv.imshow(canvas, dst);
+}
+
 function processPlayers(src, dst) {
-    umbralGreenCv(cv, src, dst);
-    morfologyCv(cv, dst, 5);
-    maskGreenFieldCv(cv, dst);
-    contoursPlayersCv(cv, src, dst);
+    umbralGreenCv(cv, src, dst); processSteps(1, dst);
+    morfologyCv(cv, dst, 5);  processSteps(2, dst);
+    maskGreenFieldCv(cv, dst);  processSteps(3, dst);
+    contoursPlayersCv(cv, src, dst); processSteps(4, dst);
 }
 
 function averageCv(cv, src, dst) {

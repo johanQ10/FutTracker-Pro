@@ -10,15 +10,16 @@
     <link rel="stylesheet" href="style.css">
     <script src="opencv.js"></script>
     <script src="canvastobmp.js"></script>
+    <script src="animation.js"></script>
     <script src="action.js"></script>
 </head>
 <body>
     <div class="app-shell">
         <aside class="sidebar">
             <div class="brand-block">
-                <p class="brand-kicker">Analisis Inteligente</p>
+                <p class="brand-kicker">Análisis Inteligente</p>
                 <h1>FutTracker Pro</h1>
-                <p class="brand-copy">Deteccion y seguimiento visual para futbol con OpenCV en tiempo real.</p>
+                <p class="brand-copy">Detección y seguimiento visual para fútbol con OpenCV en tiempo real.</p>
             </div>
 
             <section class="control-card">
@@ -29,14 +30,35 @@
 
             <section class="control-card">
                 <h2>Vista</h2>
-                <div class="radio-group" role="radiogroup" aria-label="Tipo de vista">
-                    <label class="radio-option" for="vista-lateral">
-                        <input id="vista-lateral" type="radio" name="vista" value="lateral" checked>
-                        <span>Lateral</span>
+                <div class="checkbox-group" role="group" aria-label="Opciones de vista">
+                    <label class="checkbox-option" for="view-original">
+                        <input id="view-original" type="checkbox" name="view" value="original" checked>
+                        <span>Original</span>
                     </label>
-                    <label class="radio-option" for="vista-aerea">
-                        <input id="vista-aerea" type="radio" name="vista" value="aerea">
-                        <span>Aerea</span>
+
+                    <label class="checkbox-option" for="view-procesado">
+                        <input id="view-procesado" type="checkbox" name="view" value="procesado" checked>
+                        <span>Procesado</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-1">
+                        <input id="view-step-1" type="checkbox" name="view" value="step1">
+                        <span>Paso 1: Umbralización Campo</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-2">
+                        <input id="view-step-2" type="checkbox" name="view" value="step2">
+                        <span>Paso 2: Morfología</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-3">
+                        <input id="view-step-3" type="checkbox" name="view" value="step3">
+                        <span>Paso 3: Máscara Campo</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-4">
+                        <input id="view-step-4" type="checkbox" name="view" value="step4">
+                        <span>Paso 4: Contornos de Personas</span>
                     </label>
                 </div>
             </section>
@@ -47,14 +69,37 @@
                 <header>
                     <h3>Video original</h3>
                 </header>
-                <video id="videoInput" width="972" height="648" controls></video>
+                <video id="videoInput" class="canvas-design" width="972" height="648" controls></video>
             </section>
-
             <section class="media-card">
                 <header>
                     <h3>Render procesado</h3>
                 </header>
-                <canvas id="canvasOutput" width="972" height="648"></canvas>
+                <canvas id="canvasOutput" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+            <section class="media-card">
+                <header>
+                    <h3>Paso 1: Umbralización Campo</h3>
+                </header>
+                <canvas id="canvas-step-1" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+            <section class="media-card">
+                <header>
+                    <h3>Paso 2: Morfología</h3>
+                </header>
+                <canvas id="canvas-step-2" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+            <section class="media-card">
+                <header>
+                    <h3>Paso 3: Máscara Campo</h3>
+                </header>
+                <canvas id="canvas-step-3" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+            <section class="media-card">
+                <header>
+                    <h3>Paso 4: Contornos de Personas</h3>
+                </header>
+                <canvas id="canvas-step-4" class="canvas-design" width="972" height="648"></canvas>
             </section>
         </main>
     </div>
