@@ -2,31 +2,61 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Procesador de Imágenes WebGPU</title>
+    <title>FutTracker Pro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="opencv.js"></script>
     <script src="canvastobmp.js"></script>
     <script src="action.js"></script>
 </head>
 <body>
-    <div>
-        <video id="videoInput" width="972" height="648" controls></video>
-        <canvas id="canvasOutput" width="972" height="648"></canvas>
-        <!-- <canvas id="canvasOutput2" width="972" height="648"></canvas> -->
-    </div>
-    <div>
-        <input type="file" id="fileInput" accept="video/*">
-        <div>
-            <label>
-                <input type="radio" name="vista" id="vistaLateral" value="lateral" checked>
-                Lateral
-            </label>
-            <label>
-                <input type="radio" name="vista" id="vistaSuperior" value="superior">
-                Superior
-            </label>
-        </div>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <p class="brand-kicker">Analisis Inteligente</p>
+                <h1>FutTracker Pro</h1>
+                <p class="brand-copy">Deteccion y seguimiento visual para futbol con OpenCV en tiempo real.</p>
+            </div>
+
+            <section class="control-card">
+                <h2>Archivo</h2>
+                <label for="fileInput" class="input-label">Video de entrada</label>
+                <input type="file" id="fileInput" accept="video/*">
+            </section>
+
+            <section class="control-card">
+                <h2>Vista</h2>
+                <div class="radio-group" role="radiogroup" aria-label="Tipo de vista">
+                    <label class="radio-option" for="vista-lateral">
+                        <input id="vista-lateral" type="radio" name="vista" value="lateral" checked>
+                        <span>Lateral</span>
+                    </label>
+                    <label class="radio-option" for="vista-aerea">
+                        <input id="vista-aerea" type="radio" name="vista" value="aerea">
+                        <span>Aerea</span>
+                    </label>
+                </div>
+            </section>
+        </aside>
+
+        <main class="workspace">
+            <section class="media-card">
+                <header>
+                    <h3>Video original</h3>
+                </header>
+                <video id="videoInput" width="972" height="648" controls></video>
+            </section>
+
+            <section class="media-card">
+                <header>
+                    <h3>Render procesado</h3>
+                </header>
+                <canvas id="canvasOutput" width="972" height="648"></canvas>
+            </section>
+        </main>
     </div>
 </body>
 </html>

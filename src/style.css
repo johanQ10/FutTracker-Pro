@@ -1,0 +1,206 @@
+:root {
+	--bg-a: #0c0c0c;
+	--bg-b: #171717;
+	--bg-c: #252525;
+	--panel: #131313;
+	--panel-soft: #1d1d1d;
+	--stroke: #2b2b2b;
+	--text-main: #ececec;
+	--text-soft: #a4a4a4;
+	--accent: #d6d6d6;
+	--radius-lg: 18px;
+	--radius-md: 12px;
+	--shadow: 0 22px 40px rgba(0, 0, 0, 0.35);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	min-height: 100%;
+}
+
+body {
+	font-family: "Barlow", "Segoe UI", sans-serif;
+	color: var(--text-main);
+	background:
+		radial-gradient(1200px 700px at 20% -10%, #2a2a2a 0%, transparent 55%),
+		radial-gradient(1000px 650px at 110% 10%, #1f1f1f 0%, transparent 45%),
+		linear-gradient(145deg, var(--bg-a) 0%, var(--bg-b) 45%, #0a0a0a 100%);
+}
+
+.app-shell {
+	min-height: 100vh;
+	display: grid;
+	grid-template-columns: 320px minmax(0, 1fr);
+	gap: 22px;
+	padding: 22px;
+}
+
+.sidebar {
+	border: 1px solid var(--stroke);
+	border-radius: var(--radius-lg);
+	background:
+		linear-gradient(165deg, #202020 0%, #121212 45%, #0f0f0f 100%);
+	box-shadow: var(--shadow);
+	padding: 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.brand-block {
+	margin-bottom: 6px;
+}
+
+.brand-kicker {
+	margin: 0;
+	color: var(--text-soft);
+	font-size: 0.78rem;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+}
+
+.brand-block h1 {
+	margin: 8px 0 10px;
+	font-family: "Chakra Petch", sans-serif;
+	font-size: 2rem;
+	line-height: 1.05;
+	letter-spacing: 0.03em;
+}
+
+.brand-copy {
+	margin: 0;
+	color: var(--text-soft);
+	line-height: 1.45;
+	max-width: 28ch;
+}
+
+.control-card {
+	border: 1px solid var(--stroke);
+	border-radius: var(--radius-md);
+	background:
+		linear-gradient(180deg, #1d1d1d 0%, #121212 100%);
+	padding: 14px;
+	display: grid;
+	gap: 10px;
+}
+
+.control-card h2 {
+	margin: 0;
+	font-size: 1.02rem;
+	font-weight: 600;
+}
+
+.input-label {
+	font-size: 0.86rem;
+	color: var(--text-soft);
+}
+
+input[type="file"] {
+	width: 100%;
+	border: 1px solid #3b3b3b;
+	border-radius: 10px;
+	background: #101010;
+	color: var(--text-main);
+	font-size: 0.9rem;
+	padding: 8px;
+}
+
+input[type="file"]::file-selector-button {
+	border: 1px solid #4a4a4a;
+	border-radius: 8px;
+	margin-right: 10px;
+	padding: 7px 10px;
+	background: linear-gradient(180deg, #2e2e2e 0%, #1f1f1f 100%);
+	color: #f2f2f2;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.radio-group {
+	display: grid;
+	gap: 8px;
+}
+
+.radio-option {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	border: 1px solid #333;
+	border-radius: 10px;
+	padding: 9px 10px;
+	background: #111;
+	cursor: pointer;
+}
+
+.radio-option input {
+	accent-color: var(--accent);
+}
+
+.workspace {
+	border: 1px solid var(--stroke);
+	border-radius: var(--radius-lg);
+	background:
+		linear-gradient(155deg, #161616 0%, #0f0f0f 50%, #141414 100%);
+	box-shadow: var(--shadow);
+	padding: 18px;
+	display: grid;
+	gap: 16px;
+	grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.media-card {
+	border: 1px solid #2f2f2f;
+	border-radius: 14px;
+	background: linear-gradient(180deg, #1b1b1b 0%, #111 100%);
+	padding: 10px;
+	display: grid;
+	gap: 10px;
+	overflow: hidden;
+}
+
+.media-card header h3 {
+	margin: 0;
+	font-family: "Chakra Petch", sans-serif;
+	font-size: 1rem;
+	font-weight: 600;
+	color: #e0e0e0;
+	letter-spacing: 0.02em;
+}
+
+#videoInput,
+#canvasOutput {
+	width: 100%;
+	height: 100%;
+	max-height: calc(50vh - 76px);
+	display: block;
+	border: 1px solid #303030;
+	border-radius: 10px;
+	background: #050505;
+	object-fit: contain;
+}
+
+@media (max-width: 1040px) {
+	.app-shell {
+		grid-template-columns: 1fr;
+	}
+
+	.sidebar {
+		order: 1;
+	}
+
+	.workspace {
+		order: 2;
+		grid-template-rows: auto auto;
+	}
+
+	#videoInput,
+	#canvasOutput {
+		max-height: none;
+		aspect-ratio: 16 / 9;
+	}
+}
