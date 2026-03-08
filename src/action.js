@@ -54,6 +54,8 @@ document.addEventListener('DOMContentLoaded', () => {
         video.play();
     });
 
+    setupPlaybackControls(video);
+
     video.addEventListener('play', () => {
         console.log('Video: play');
         startProcessing();
@@ -77,6 +79,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     toggleCanvas();
 });
+
+function setupPlaybackControls(video) {
+    const playButton = document.getElementById('btn-play');
+    const pauseButton = document.getElementById('btn-pause');
+    const resetButton = document.getElementById('btn-reset');
+
+    if (playButton) {
+        playButton.addEventListener('click', async () => {
+            if (!video || (!video.src && video.readyState === 0)) return;
+
+            try {
+                await video.play();
+            } catch (error) {
+                console.error('No se pudo reanudar el video:', error);
+            }
+        });
+    }
+
+    if (pauseButton) {
+        pauseButton.addEventListener('click', () => {
+            if (!video) return;
+            video.pause();
+        });
+    }
+
+    if (resetButton) {
+        resetButton.addEventListener('click', () => {
+            if (!video || (!video.src && video.readyState === 0)) return;
+            video.pause();
+            video.currentTime = 0;
+        });
+    }
+}
 
 function toggleCanvas() {
     document.getElementById('view-original').addEventListener('change', (e) => {
