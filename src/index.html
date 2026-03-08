@@ -65,37 +65,37 @@
         </aside>
 
         <main class="workspace">
-            <section class="media-card">
+            <section class="media-card" id="content-original">
                 <header>
                     <h3>Video original</h3>
                 </header>
-                <video id="videoInput" class="canvas-design" width="972" height="648" controls></video>
+                <video id="video-input" class="canvas-design" width="972" height="648" controls></video>
             </section>
-            <section class="media-card">
+            <section class="media-card" id="content-procesado">
                 <header>
                     <h3>Render procesado</h3>
                 </header>
-                <canvas id="canvasOutput" class="canvas-design" width="972" height="648"></canvas>
+                <canvas id="canvas-output" class="canvas-design" width="972" height="648"></canvas>
             </section>
-            <section class="media-card">
+            <section class="media-card" id="content-step-1" style="display: none;">
                 <header>
                     <h3>Paso 1: Umbralización Campo</h3>
                 </header>
                 <canvas id="canvas-step-1" class="canvas-design" width="972" height="648"></canvas>
             </section>
-            <section class="media-card">
+            <section class="media-card" id="content-step-2" style="display: none;">
                 <header>
                     <h3>Paso 2: Morfología</h3>
                 </header>
                 <canvas id="canvas-step-2" class="canvas-design" width="972" height="648"></canvas>
             </section>
-            <section class="media-card">
+            <section class="media-card" id="content-step-3" style="display: none;">
                 <header>
                     <h3>Paso 3: Máscara Campo</h3>
                 </header>
                 <canvas id="canvas-step-3" class="canvas-design" width="972" height="648"></canvas>
             </section>
-            <section class="media-card">
+            <section class="media-card" id="content-step-4" style="display: none;">
                 <header>
                     <h3>Paso 4: Contornos de Personas</h3>
                 </header>

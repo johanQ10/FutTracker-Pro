@@ -9,8 +9,8 @@ let count = 0;
 let first = false;
 
 document.addEventListener('DOMContentLoaded', () => {
-    const video = document.getElementById('videoInput');
-    const canvas = document.getElementById('canvasOutput');
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
     let animationId = null;
     let isProcessing = false;
@@ -74,7 +74,30 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Video: ended');
         stopProcessing();
     });
+
+    toggleCanvas();
 });
+
+function toggleCanvas() {
+    document.getElementById('view-original').addEventListener('change', (e) => {
+        document.getElementById('content-original').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-procesado').addEventListener('change', (e) => {
+        document.getElementById('content-procesado').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-1').addEventListener('change', (e) => {
+        document.getElementById('content-step-1').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-2').addEventListener('change', (e) => {
+        document.getElementById('content-step-2').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-3').addEventListener('change', (e) => {
+        document.getElementById('content-step-3').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-4').addEventListener('change', (e) => {
+        document.getElementById('content-step-4').style.display = e.target.checked ? 'grid' : 'none';
+    });
+}
 
 function reset() {
     isChanged = false;
@@ -86,7 +109,7 @@ function reset() {
     clusterR = -1;
     count = 0;
     first = false;
-    const canvas = document.getElementById('canvasOutput');
+    const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
@@ -107,7 +130,6 @@ function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
     dst.delete();
     // 6. Call the next frame
     const id = requestAnimationFrame(() => processVideo(video, canvas, ctx, shouldContinue, setAnimationId));
-
     setAnimationId(id);
 }
 
