@@ -1,4 +1,6 @@
 
+let canvasWidth = 0;
+let canvasHeight = 0;
 let colorA = [ 0, 0, 0, 255 ];
 let colorB = [ 0, 0, 0, 255 ];
 let colorR = [ 0, 0, 0, 255 ];
@@ -7,6 +9,8 @@ let clusterB = -1;
 let clusterR = -1;
 let count = 0;
 let first = false;
+let ballPoint1;
+let ballPoint2;
 
 document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('video-input');
@@ -132,6 +136,15 @@ function toggleCanvas() {
     document.getElementById('view-step-4').addEventListener('change', (e) => {
         document.getElementById('content-step-4').style.display = e.target.checked ? 'grid' : 'none';
     });
+    document.getElementById('view-step-5').addEventListener('change', (e) => {
+        document.getElementById('content-step-5').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-6').addEventListener('change', (e) => {
+        document.getElementById('content-step-6').style.display = e.target.checked ? 'grid' : 'none';
+    });
+    document.getElementById('view-step-7').addEventListener('change', (e) => {
+        document.getElementById('content-step-7').style.display = e.target.checked ? 'grid' : 'none';
+    });
 }
 
 function reset() {
@@ -153,33 +166,35 @@ function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
     if (!shouldContinue() || video.paused || video.ended) return;
     // 1. Get current frame from video
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvasWidth = canvas.width;
+    canvasHeight = canvas.height;
     // 2. Create Mat OpenvCv src and dst
     let src = cv.imread(canvas);
-    let dst = new cv.Mat();
     // 3. Process current frame (image)
-    processImage(src, dst);
+    processImage(src);
     // 4. Show the result on the canvas
     cv.imshow(canvas, src);
     // 5. Free memory
     src.delete();
-    dst.delete();
     // 6. Call the next frame
     const id = requestAnimationFrame(() => processVideo(video, canvas, ctx, shouldContinue, setAnimationId));
     setAnimationId(id);
 }
 
-function processImage(src, dst) {
+function processImage(src) {
+    let dst = new cv.Mat();
+    let dstBall = new cv.Mat();
+    let srcBall = new cv.Mat();
+
+    src.copyTo(srcBall);
+
+    processBall(srcBall, dstBall);
     processPlayers(src, dst);
-    // processReferee(src, dst);
 
-    // averageCv(cv, src, dst);
-    // removeFieldCv(cv, src, dst);
-    // averageCv(cv, dst, dst);
-    // kMeansColorCv(cv, dst);
-    // popularityCv(cv, dst, dst);
-
-    // contoursCv(cv, src, dst);
-    // dst.copyTo(src);
+    srcBall.delete();
+    dstBall.delete();
+    dst.delete();
 }
 
 function processSteps(step, dst) {
@@ -197,12 +212,18 @@ function processPlayers(src, dst) {
     contoursPlayersCv(cv, src, dst); processSteps(4, dst);
 }
 
-function averageCv(cv, src, dst) {
+function processBall(src, dst) {
+    umbralGreenCv(cv, src, dst, true); processSteps(5, dst);
+    maskGreenFieldCv(cv, dst);  processSteps(6, dst);
+    contoursBallCv(cv, src, dst); processSteps(7, dst);
+}
+
+function blurCv(cv, src, dst) {
     // cv.blur(src, dst, new cv.Size(7, 7), new cv.Point(-1, -1), cv.BORDER_DEFAULT);
     cv.medianBlur(src, dst, 7);
 }
 
-function umbralGreenCv(cv, src, dst) {
+function umbralGreenCv(cv, src, dst, isBall = false) {
     let rgb = new cv.Mat();
     let hsv = new cv.Mat();
     let maskGreen = new cv.Mat();
@@ -210,7 +231,7 @@ function umbralGreenCv(cv, src, dst) {
     cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB, 0);
     cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV, 0);
 
-    let lowerGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [40, 20, 60, 0]);
+    let lowerGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [40, isBall ? 120 : 20, 60, 0]);
     let upperGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [75, 255, 255, 255]);
 
     cv.inRange(hsv, lowerGreen, upperGreen, dst);
@@ -251,14 +272,14 @@ function contoursPlayersCv(cv, src, dst) {
     const candidates = []; // { rect, color:[r,g,b] }
 
     for (let i = 0; i < contours.size(); i++) {
-        let contour = contours.get(i);
-        let rect = cv.boundingRect(contour);
-        let contourArea = cv.contourArea(contour);
-        let rectArea = rect.width * rect.height;
-        let aspectRatio = rect.width / rect.height;
-        let fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
+        const contour = contours.get(i);
+        const rect = cv.boundingRect(contour);
+        const contourArea = cv.contourArea(contour);
+        const rectArea = rect.width * rect.height;
+        const aspectRatio = rect.width / rect.height;
+        const fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
 
-        let condition = ((rect.width * 6) < rect.height) || 
+        const condition = ((rect.width * 6) < rect.height) || 
             ((rect.height * 3) < rect.width) || 
             (rect.width > 200 || rect.height > 200) ||
             (rect.height < 12) ||
@@ -294,6 +315,9 @@ function contoursPlayersCv(cv, src, dst) {
     const maxIter = 10;
     const attempts = 3;
     const offset = 10;
+
+    const players = [];
+    const referees = [];
 
     if (k >= 2) {
         const samplesArray = [];
@@ -395,33 +419,38 @@ function contoursPlayersCv(cv, src, dst) {
 
             const solidColor = intensityColorContrast(r, g, b);//[r, g, b, 255]
 
-            if (isA || isB || isR)
+            if (isA) players.push({ rect, color: solidColor, type: 'A' });
+            else if (isB) players.push({ rect, color: solidColor, type: 'B' });
+            else if (isR) referees.push({ rect, color: solidColor, type: 'R' });
+
+            if (isA || isB) {
                 cv.rectangle(src, point1, point2, solidColor, 4);
 
-            const text = isA ? 'Team A' : isB ? 'Team B' : isR ? 'Referee' : '';
-            const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
+                const text = isA ? 'Team A' : isB ? 'Team B' : '';
+                const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
 
-            cv.putText(
-                src,
-                text,
-                textOrg,
-                cv.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                [255, 255, 255, 255],
-                4,
-                cv.LINE_AA
-            );
+                cv.putText(
+                    src,
+                    text,
+                    textOrg,
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    [255, 255, 255, 255],
+                    4,
+                    cv.LINE_AA
+                );
 
-            cv.putText(
-                src,
-                text,
-                textOrg,
-                cv.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                solidColor,
-                2,
-                cv.LINE_AA
-            );
+                cv.putText(
+                    src,
+                    text,
+                    textOrg,
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    solidColor,
+                    2,
+                    cv.LINE_AA
+                );
+            }
         }
 
         if (indexUnion2 !== -1)
@@ -465,6 +494,112 @@ function contoursPlayersCv(cv, src, dst) {
         }
     }
 
+    let minDistance = 1000;
+    let minIndex = 0;
+    let index = 0;
+    const centerCanvas = new cv.Point(canvasWidth / 2, canvasHeight / 2);
+
+    for (const referee of referees) {
+        const point = new cv.Point((referee.rect.x + referee.rect.x + referee.rect.width) / 2, (referee.rect.y + referee.rect.y + referee.rect.height) / 2);
+        const dist = distance(point, centerCanvas);
+
+        if (dist < minDistance) {
+            minDistance = dist;
+            minIndex = index;
+        }
+
+        index++;
+    }
+
+    if (referees.length > 0) {
+        const point1 = new cv.Point(referees[minIndex].rect.x - offset, referees[minIndex].rect.y - offset);
+        const point2 = new cv.Point(referees[minIndex].rect.x + referees[minIndex].rect.width + offset, referees[minIndex].rect.y + referees[minIndex].rect.height + offset);
+
+        cv.rectangle(src, point1, point2, referees[minIndex].color, 4);
+
+        const text = 'Referee';
+        const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
+
+        cv.putText(
+            src,
+            text,
+            textOrg,
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            [255, 255, 255, 255],
+            4,
+            cv.LINE_AA
+        );
+
+        cv.putText(
+            src,
+            text,
+            textOrg,
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            referees[minIndex].color,
+            2,
+            cv.LINE_AA
+        );
+    }
+
+    if (ballPoint1 != null && ballPoint2 != null)
+        cv.rectangle(src, ballPoint1, ballPoint2, [255, 255, 255, 255], 4);
+
+    contours.delete();
+    hierarchy.delete();
+}
+
+function contoursBallCv(cv, src, dst) {
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    const candidates = [];
+
+    const centerCanvas = new cv.Point(canvasWidth / 2, canvasHeight / 2);
+
+    for (let i = 0; i < contours.size(); i++) {
+        const contour = contours.get(i);
+        const rect = cv.boundingRect(contour);
+
+        if (!isBallCandidate(contour)) {
+            cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
+            contour.delete();
+            continue;
+        }
+
+        const mask = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
+        const one = new cv.MatVector();
+        one.push_back(contour);
+        cv.drawContours(mask, one, 0, new cv.Scalar(255), cv.FILLED);
+
+        const point = new cv.Point((rect.x + rect.x + rect.width) / 2, (rect.y + rect.y + rect.height) / 2);
+
+        const dist = distance(point, centerCanvas);
+
+        candidates.push({ rect, dist });
+
+        one.delete();
+        mask.delete();
+        contour.delete();
+    }
+
+    if (candidates.length === 0) {
+        ballPoint1 = null;
+        ballPoint2 = null;
+        contours.delete();
+        hierarchy.delete();
+        return;
+    }
+
+    candidates.sort((a, b) => a.dist - b.dist);
+
+    const offset = 5;
+    const rect = candidates[0].rect;
+    ballPoint1 = new cv.Point(rect.x - offset, rect.y - offset);
+    ballPoint2 = new cv.Point(rect.x + rect.width + offset, rect.y + rect.height + offset);
+
     contours.delete();
     hierarchy.delete();
 }
@@ -474,77 +609,6 @@ function removeFieldCv(cv, src, dst) {
     cv.bitwise_and(src, src, mask, dst);
     mask.copyTo(dst);
     mask.delete();
-}
-
-function kMeansColorCv(cv, dst) {
-    let maxIter = 3;
-    let k = 10;
-
-    cv.cvtColor(dst, dst, cv.COLOR_RGBA2RGB, 0);
-
-    let rows = dst.rows, cols = dst.cols;
-    // let arr = [];
-
-    // for (let i = 0; i < rows; i++) {
-        // for (let j = 0; j < cols; j++) {
-            // let pixel = dst.ucharPtr(i, j);
-            // arr.push(pixel[0], pixel[1], pixel[2]);
-        // }
-    // }
-
-    // let matrix = cv.matFromArray(rows * cols, 3, cv.CV_32F, arr);
-    let samples = cv.matFromArray(rows * cols, 3, cv.CV_8U, dst.data);
-    let matrix = new cv.Mat();
-    samples.convertTo(matrix, cv.CV_32F);
-
-    let labels = new cv.Mat();
-    let centers = new cv.Mat();
-
-    cv.kmeans(
-        matrix,
-        k,
-        labels,
-        new cv.TermCriteria(cv.TermCriteria_EPS + cv.TermCriteria_MAX_ITER, maxIter, 1.0),
-        3,
-        cv.KMEANS_PP_CENTERS,
-        // cv.KMEANS_RANDOM_CENTERS,
-        centers
-    );
-
-    // Crear la imagen resultante
-    let newImg = new cv.Mat(rows, cols, dst.type());
-    // let idx = 0;
-
-    // for (let i = 0; i < rows; i++) {
-        // for (let j = 0; j < cols; j++, idx++) {
-            // let centerIdx = labels.intAt(idx, 0);
-            // let pixel = newImg.ucharPtr(i, j);
-            // pixel[0] = centers.floatAt(centerIdx, 0);
-            // pixel[1] = centers.floatAt(centerIdx, 1);
-            // pixel[2] = centers.floatAt(centerIdx, 2);
-        // }
-    // }
-
-    const labelsData = labels.data32S;     // N labels
-    const centersData = centers.data32F;   // k*3 (RGB)
-    const out = newImg.data;               // Uint8Array, tamaño N*3
-    const total = rows * cols;
-
-    for (let i = 0; i < total; i++) {
-        const c = labelsData[i] * 3;
-        const o = i * 3;
-
-        out[o]     = centersData[c]     | 0;
-        out[o + 1] = centersData[c + 1] | 0;
-        out[o + 2] = centersData[c + 2] | 0;
-    }
-
-    samples.delete();
-    matrix.delete();
-    labels.delete();
-    centers.delete();
-    newImg.copyTo(dst);
-    newImg.delete();
 }
 
 // --- Utils --- //
@@ -657,24 +721,64 @@ function mergeSimilarClusters(labels, centers, threshold = 30) {
 
 function isBallCandidate(contour) {
     const area = cv.contourArea(contour);
-    // Tiny ball in wide shots usually appears as very small blobs.
-    if (area < 4 || area > 180) return false;
-    
+    // Ajusta según resolución/zoom del video
+    if (area < 6 || area > 140) return false;
+
     const peri = cv.arcLength(contour, true);
     if (peri <= 0) return false;
-    
+
     const circularity = (4 * Math.PI * area) / (peri * peri);
-    // Relax circularity for pixelated small contours.
-    if (circularity < 0.35) return false;
-    
+    if (circularity < 0.5) return false;
+
     const r = cv.boundingRect(contour);
-    const ratio = r.width / r.height;
+    if (r.width < 3 || r.height < 3) return false;
+    if (r.width > 20 || r.height > 20) return false;
 
-    if (ratio < 0.55 || ratio > 1.8) return false;
-    if (r.width > 24 || r.height > 24) return false;
+    const aspect = r.width / r.height;
+    if (aspect < 0.68 || aspect > 1.45) return false;
 
-    // Keep console clean during frame processing.
-    // console.log(`Ball candidate: area=${area.toFixed(2)}, peri=${peri.toFixed(2)}, circularity=${circularity.toFixed(2)}, ratio=${ratio.toFixed(2)}`);
+    const rectArea = r.width * r.height;
+    const extent = rectArea > 0 ? area / rectArea : 0;
+    // Si es muy bajo, suele ser ruido/alargado irregular
+    if (extent < 0.38) return false;
 
-  return true;
+    const hull = new cv.Mat();
+    cv.convexHull(contour, hull, false, true);
+    const hullArea = cv.contourArea(hull);
+    hull.delete();
+
+    const solidity = hullArea > 0 ? area / hullArea : 0;
+    if (solidity < 0.82) return false;
+
+    const enc = cv.minEnclosingCircle(contour); // { center, radius }
+    const circleArea = Math.PI * enc.radius * enc.radius;
+    const circleFill = circleArea > 0 ? area / circleArea : 0;
+    // Para blobs pequeños/pixelados, este rango funciona bien
+    if (circleFill < 0.4 || circleFill > 1.35) return false;
+
+    const margin = 40;
+    const rect = cv.boundingRect(contour);
+    const leftTop = new cv.Point(rect.x, rect.y);
+    const rightTop = new cv.Point(rect.x + rect.width, rect.y);
+    const leftBottom = new cv.Point(rect.x, rect.y + rect.height);
+    const rightBottom = new cv.Point(rect.x + rect.width, rect.y + rect.height);
+
+    const condition = (leftTop.x - margin < 0) || 
+            (leftTop.y - margin < 0) || 
+            (rightTop.x + margin > canvasWidth) || 
+            (rightTop.y - margin < 0) || 
+            (leftBottom.x - margin < 0) || 
+            (leftBottom.y + margin > canvasHeight) || 
+            (rightBottom.x + margin > canvasWidth) || 
+            (rightBottom.y + margin > canvasHeight);
+
+    if (condition) return false;
+
+    return true;
+}
+
+function distance(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return Math.hypot(dx, dy); // sqrt(dx*dx + dy*dy)
 }
