@@ -11,6 +11,8 @@ let count = 0;
 let first = false;
 let ballPoint1;
 let ballPoint2;
+let teamAPossession = 0;
+let teamBPossession = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('video-input');
@@ -157,6 +159,9 @@ function reset() {
     clusterR = -1;
     count = 0;
     first = false;
+    teamAPossession = 0;
+    teamBPossession = 0;
+
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -191,6 +196,7 @@ function processImage(src) {
 
     processBall(srcBall, dstBall);
     processPlayers(src, dst);
+    processBallPossession(src);
 
     srcBall.delete();
     dstBall.delete();
@@ -216,6 +222,60 @@ function processBall(src, dst) {
     umbralGreenCv(cv, src, dst, true); processSteps(5, dst);
     maskGreenFieldCv(cv, dst);  processSteps(6, dst);
     contoursBallCv(cv, src, dst); processSteps(7, dst);
+}
+
+function processBallPossession(src) {
+    const totalPossession = teamAPossession + teamBPossession;
+    const textPosA = new cv.Point(10, 70);
+    const textA = 'Team A: ' + Math.round((teamAPossession * 100) / totalPossession) + '%';
+    const textPosB = new cv.Point(10, 90);
+    const textB = 'Team B: ' + Math.round((teamBPossession * 100) / totalPossession) + '%';
+    const fillWidth = 2;
+    const strokeWidth = 4;
+
+    cv.putText(
+        src,
+        textA,
+        textPosA,
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        [255, 255, 255, 255],
+        strokeWidth,
+        cv.LINE_AA
+    );
+
+    cv.putText(
+        src,
+        textA,
+        textPosA,
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        intensityColorContrast(colorA[0], colorA[1], colorA[2]),
+        fillWidth,
+        cv.LINE_AA
+    );
+
+    cv.putText(
+        src,
+        textB,
+        textPosB,
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        [255, 255, 255, 255],
+        strokeWidth,
+        cv.LINE_AA
+    );
+
+    cv.putText(
+        src,
+        textB,
+        textPosB,
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        intensityColorContrast(colorB[0], colorB[1], colorB[2]),
+        fillWidth,
+        cv.LINE_AA
+    );
 }
 
 function blurCv(cv, src, dst) {
@@ -543,8 +603,31 @@ function contoursPlayersCv(cv, src, dst) {
         );
     }
 
-    if (ballPoint1 != null && ballPoint2 != null)
+    if (ballPoint1 != null && ballPoint2 != null) {
         cv.rectangle(src, ballPoint1, ballPoint2, [255, 255, 255, 255], 4);
+
+        minDistance = 1000;
+        minIndex = 0;
+        index = 0;
+
+        if (players.length > 0) {
+            for (const player of players) {
+                const centerBall = new cv.Point((ballPoint1.x + ballPoint2.x) / 2, (ballPoint1.y + ballPoint2.y) / 2);
+                const point = new cv.Point((player.rect.x + player.rect.x + player.rect.width) / 2, (player.rect.y + player.rect.y + player.rect.height) / 2);
+                const dist = distance(point, centerBall);
+
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    minIndex = index;
+                }
+
+                index++;
+            }
+
+            if (players[minIndex].type === 'A') teamAPossession++;
+            else teamBPossession++;
+        }
+    }
 
     contours.delete();
     hierarchy.delete();
