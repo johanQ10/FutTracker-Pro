@@ -106,6 +106,30 @@ body {
 	color: var(--text-soft);
 }
 
+.range-row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: center;
+	gap: 10px;
+}
+
+#contrast-slider, #contrast-slider-ball {
+	width: 100%;
+	accent-color: #d8d8d8;
+	cursor: pointer;
+}
+
+#contrast-value, #contrast-value-ball {
+	min-width: 54px;
+	text-align: center;
+	font-size: 0.84rem;
+	padding: 4px 8px;
+	border: 1px solid #3a3a3a;
+	border-radius: 999px;
+	background: #101010;
+	color: #efefef;
+}
+
 .transport-actions {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));

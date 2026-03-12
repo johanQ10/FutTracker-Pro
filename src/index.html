@@ -38,6 +38,54 @@
             </section>
 
             <section class="control-card">
+                <h2>Contraste Jugadores</h2>
+                <label for="contrast-slider" class="input-label">Ajuste de contraste para umbralización</label>
+                <div class="range-row">
+                    <input id="contrast-slider" type="range" min="50" max="200" step="1" value="100" aria-label="Control de contraste">
+                    <output id="contrast-value" for="contrast-slider" aria-live="polite">1.00x</output>
+                </div>
+            </section>
+
+            <section class="control-card">
+                <h2>Contraste Balón</h2>
+                <label for="contrast-slider-ball" class="input-label">Ajuste de contraste para umbralización</label>
+                <div class="range-row">
+                    <input id="contrast-slider-ball" type="range" min="50" max="200" step="1" value="100" aria-label="Control de contraste">
+                    <output id="contrast-value-ball" for="contrast-slider-ball" aria-live="polite">1.00x</output>
+                </div>
+            </section>
+
+            <section class="control-card">
+                <h2>Capas de detección</h2>
+                <div class="checkbox-group" role="group" aria-label="Capas de detección">
+                    <label class="checkbox-option" for="overlay-possession">
+                        <input id="overlay-possession" type="checkbox" checked>
+                        <span>Posesión de balón</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-team-a">
+                        <input id="overlay-team-a" type="checkbox" checked>
+                        <span>Team A</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-team-b">
+                        <input id="overlay-team-b" type="checkbox" checked>
+                        <span>Team B</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-referee">
+                        <input id="overlay-referee" type="checkbox" checked>
+                        <span>Referee</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-ball-box">
+                        <input id="overlay-ball-box" type="checkbox" checked>
+                        <span>Balón</span>
+                    </label>
+                </div>
+            </section>
+
+            <section class="control-card">
                 <h2>Vista</h2>
                 <div class="checkbox-group" role="group" aria-label="Opciones de vista">
                     <label class="checkbox-option" for="view-original">
@@ -52,37 +100,42 @@
 
                     <label class="checkbox-option" for="view-step-1">
                         <input id="view-step-1" type="checkbox" name="view" value="step1">
-                        <span>Paso 1: Umbralización Campo</span>
+                        <span>Paso 1: Contraste</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-2">
                         <input id="view-step-2" type="checkbox" name="view" value="step2">
-                        <span>Paso 2: Morfología</span>
+                        <span>Paso 2: Umbralización Campo</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-3">
                         <input id="view-step-3" type="checkbox" name="view" value="step3">
-                        <span>Paso 3: Máscara Campo</span>
+                        <span>Paso 3: Morfología</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-4">
                         <input id="view-step-4" type="checkbox" name="view" value="step4">
-                        <span>Paso 4: Contornos de Personas</span>
+                        <span>Paso 4: Máscara Campo</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-5">
                         <input id="view-step-5" type="checkbox" name="view" value="step5">
-                        <span>Paso 5: Umbralización Campo Balón</span>
+                        <span>Paso 5: Contornos de Personas</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-6">
                         <input id="view-step-6" type="checkbox" name="view" value="step6">
-                        <span>Paso 6: Máscara Campo Balón</span>
+                        <span>Paso 6: Umbralización Campo Balón</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-7">
                         <input id="view-step-7" type="checkbox" name="view" value="step7">
-                        <span>Paso 7: Contorno de Balón</span>
+                        <span>Paso 7: Máscara Campo Balón</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-8">
+                        <input id="view-step-8" type="checkbox" name="view" value="step8">
+                        <span>Paso 8: Contorno de Balón</span>
                     </label>
                 </div>
             </section>
@@ -105,51 +158,58 @@
 
             <section class="media-card" id="content-step-1" style="display: none;">
                 <header>
-                    <h3>Paso 1: Umbralización Campo</h3>
+                    <h3>Paso 1: Contraste</h3>
                 </header>
                 <canvas id="canvas-step-1" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-2" style="display: none;">
                 <header>
-                    <h3>Paso 2: Morfología</h3>
+                    <h3>Paso 2: Umbralización Campo</h3>
                 </header>
                 <canvas id="canvas-step-2" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-3" style="display: none;">
                 <header>
-                    <h3>Paso 3: Máscara Campo</h3>
+                    <h3>Paso 3: Morfología</h3>
                 </header>
                 <canvas id="canvas-step-3" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-4" style="display: none;">
                 <header>
-                    <h3>Paso 4: Contornos de Personas</h3>
+                    <h3>Paso 4: Máscara Campo</h3>
                 </header>
                 <canvas id="canvas-step-4" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-5" style="display: none;">
                 <header>
-                    <h3>Paso 5: Umbralización Campo Balón</h3>
+                    <h3>Paso 5: Contornos de Personas</h3>
                 </header>
                 <canvas id="canvas-step-5" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-6" style="display: none;">
                 <header>
-                    <h3>Paso 6: Máscara Campo Balón</h3>
+                    <h3>Paso 6: Umbralización Campo Balón</h3>
                 </header>
                 <canvas id="canvas-step-6" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-7" style="display: none;">
                 <header>
-                    <h3>Paso 7: Contorno de Balón</h3>
+                    <h3>Paso 7: Máscara Campo Balón</h3>
                 </header>
                 <canvas id="canvas-step-7" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+
+            <section class="media-card" id="content-step-8" style="display: none;">
+                <header>
+                    <h3>Paso 8: Contorno de Balón</h3>
+                </header>
+                <canvas id="canvas-step-8" class="canvas-design" width="972" height="648"></canvas>
             </section>
         </main>
     </div>
