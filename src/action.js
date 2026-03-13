@@ -15,6 +15,21 @@ let teamAPossession = 0;
 let teamBPossession = 0;
 let umbralContrastPlayer = 1.0;
 let umbralContrastBall = 1.0;
+let currentRefereeFootPoint = null;
+
+const HEATMAP_CANVAS_WIDTH = 840;
+const HEATMAP_CANVAS_HEIGHT = 544;
+const HEATMAP_GRID_WIDTH = 140;
+const HEATMAP_GRID_HEIGHT = 90;
+const HEATMAP_SMOOTH_RADIUS = 3;
+
+let isCalibratingField = false;
+let fieldCalibrationPoints = [];
+let fieldHomographyMat = null;
+let refereeHeatmapGrid = new Float32Array(HEATMAP_GRID_WIDTH * HEATMAP_GRID_HEIGHT);
+let refereeHeatmapMax = 0;
+let lastProjectedRefereePoint = null;
+let heatmapBufferCanvas = null;
 
 const distRgb = (a, b) => {
     const dr = a[0] - b[0];
@@ -102,6 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     setupPlaybackControls(video);
+    setupProjectionControls(video, canvas);
 
     video.addEventListener('play', () => {
         console.log('Video: play');
@@ -124,6 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopProcessing();
     });
 
+    renderRefereeHeatmap();
     toggleCanvas();
 });
 
@@ -206,6 +223,10 @@ function reset() {
     first = false;
     teamAPossession = 0;
     teamBPossession = 0;
+    currentRefereeFootPoint = null;
+    lastProjectedRefereePoint = null;
+    clearRefereeHeatmapData();
+    renderRefereeHeatmap();
 
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
@@ -241,6 +262,7 @@ function processImage(src) {
 
     processBall(srcBall, dstBall);
     processPlayers(src, dst);
+    processRefereeProjection(src);
     processBallPossession(src);
 
     srcBall.delete();
@@ -592,11 +614,17 @@ function contoursPlayersCv(cv, src, dst) {
     }
 
     if (referees.length > 0) {
-        if (isOverlayEnabled('overlay-referee')) {
-            const point1 = new cv.Point(referees[minIndex].rect.x - offset, referees[minIndex].rect.y - offset);
-            const point2 = new cv.Point(referees[minIndex].rect.x + referees[minIndex].rect.width + offset, referees[minIndex].rect.y + referees[minIndex].rect.height + offset);
+        const selectedRef = referees[minIndex];
+        currentRefereeFootPoint = new cv.Point(
+            selectedRef.rect.x + (selectedRef.rect.width / 2),
+            selectedRef.rect.y + selectedRef.rect.height
+        );
 
-            cv.rectangle(src, point1, point2, referees[minIndex].color, 4);
+        if (isOverlayEnabled('overlay-referee')) {
+            const point1 = new cv.Point(selectedRef.rect.x - offset, selectedRef.rect.y - offset);
+            const point2 = new cv.Point(selectedRef.rect.x + selectedRef.rect.width + offset, selectedRef.rect.y + selectedRef.rect.height + offset);
+
+            cv.rectangle(src, point1, point2, selectedRef.color, 4);
 
             const text = 'Referee';
             const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
@@ -618,11 +646,13 @@ function contoursPlayersCv(cv, src, dst) {
                 textOrg,
                 cv.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                referees[minIndex].color,
+                selectedRef.color,
                 2,
                 cv.LINE_AA
             );
         }
+    } else {
+        currentRefereeFootPoint = null;
     }
 
     if (ballPoint1 != null && ballPoint2 != null) {
@@ -857,4 +887,331 @@ function distance(p1, p2) {
 function isOverlayEnabled(id) {
     const control = document.getElementById(id);
     return !control || control.checked;
+}
+
+function setupProjectionControls(video, canvas) {
+    const calibrateButton = document.getElementById('btn-calibrate-field');
+    const clearHeatmapButton = document.getElementById('btn-clear-ref-heatmap');
+
+    if (calibrateButton) {
+        calibrateButton.addEventListener('click', () => {
+            if (!video || (!video.src && video.readyState === 0)) {
+                updateProjectionStatus('Carga un video antes de calibrar.');
+                return;
+            }
+
+            if (!video.paused) {
+                updateProjectionStatus('Pausa el video para marcar los 4 puntos de calibración.');
+                return;
+            }
+
+            isCalibratingField = true;
+            fieldCalibrationPoints = [];
+            updateProjectionStatus('Calibración activa: marca 4 puntos en orden (sup-izq, sup-der, inf-der, inf-izq).');
+        });
+    }
+
+    if (clearHeatmapButton) {
+        clearHeatmapButton.addEventListener('click', () => {
+            clearRefereeHeatmapData();
+            renderRefereeHeatmap();
+            updateProjectionStatus(fieldHomographyMat ? 'Mapa de calor reiniciado.' : 'Mapa limpiado. Falta calibrar la proyección.');
+        });
+    }
+
+    if (canvas) {
+        canvas.addEventListener('click', (event) => {
+            if (!isCalibratingField) return;
+
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+
+            const x = ((event.clientX - rect.left) * canvas.width) / rect.width;
+            const y = ((event.clientY - rect.top) * canvas.height) / rect.height;
+
+            fieldCalibrationPoints.push({ x, y });
+
+            if (fieldCalibrationPoints.length < 4) {
+                updateProjectionStatus(`Punto ${fieldCalibrationPoints.length}/4 marcado. Sigue con el siguiente.`);
+                return;
+            }
+
+            const calibrated = computeFieldHomography();
+            isCalibratingField = false;
+
+            if (!calibrated) {
+                updateProjectionStatus('No se pudo calcular la homografía. Repite la calibración.');
+                return;
+            }
+
+            clearRefereeHeatmapData();
+            renderRefereeHeatmap();
+            updateProjectionStatus('Proyección calibrada. El mapa de calor del árbitro está activo.');
+        });
+    }
+}
+
+function updateProjectionStatus(message) {
+    const status = document.getElementById('projection-status');
+    if (status)
+        status.textContent = message;
+}
+
+function computeFieldHomography() {
+    if (fieldCalibrationPoints.length !== 4)
+        return false;
+
+    if (!cv || typeof cv.getPerspectiveTransform !== 'function')
+        return false;
+
+    const srcData = [];
+    for (const point of fieldCalibrationPoints)
+        srcData.push(point.x, point.y);
+
+    const dstData = [
+        0, 0,
+        HEATMAP_CANVAS_WIDTH - 1, 0,
+        HEATMAP_CANVAS_WIDTH - 1, HEATMAP_CANVAS_HEIGHT - 1,
+        0, HEATMAP_CANVAS_HEIGHT - 1
+    ];
+
+    const srcMat = cv.matFromArray(4, 1, cv.CV_32FC2, srcData);
+    const dstMat = cv.matFromArray(4, 1, cv.CV_32FC2, dstData);
+
+    if (fieldHomographyMat)
+        fieldHomographyMat.delete();
+
+    fieldHomographyMat = cv.getPerspectiveTransform(srcMat, dstMat);
+
+    srcMat.delete();
+    dstMat.delete();
+
+    return !!fieldHomographyMat;
+}
+
+function processRefereeProjection(src) {
+    if (isCalibratingField || fieldCalibrationPoints.length > 0)
+        drawFieldCalibrationOverlay(src);
+
+    if (!fieldHomographyMat || !currentRefereeFootPoint) {
+        renderRefereeHeatmap(lastProjectedRefereePoint);
+        return;
+    }
+
+    const projected = projectPointToTopView(currentRefereeFootPoint);
+    if (!projected) {
+        renderRefereeHeatmap(lastProjectedRefereePoint);
+        return;
+    }
+
+    lastProjectedRefereePoint = projected;
+    accumulateRefereeHeatmap(projected.x, projected.y);
+    renderRefereeHeatmap(projected);
+}
+
+function projectPointToTopView(point) {
+    const srcPoint = cv.matFromArray(1, 1, cv.CV_32FC2, [point.x, point.y]);
+    const dstPoint = new cv.Mat();
+
+    cv.perspectiveTransform(srcPoint, dstPoint, fieldHomographyMat);
+
+    const x = dstPoint.data32F[0];
+    const y = dstPoint.data32F[1];
+
+    srcPoint.delete();
+    dstPoint.delete();
+
+    if (!Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+
+    return {
+        x: Math.max(0, Math.min(HEATMAP_CANVAS_WIDTH - 1, x)),
+        y: Math.max(0, Math.min(HEATMAP_CANVAS_HEIGHT - 1, y))
+    };
+}
+
+function accumulateRefereeHeatmap(x, y) {
+    const gx = Math.round((x / HEATMAP_CANVAS_WIDTH) * (HEATMAP_GRID_WIDTH - 1));
+    const gy = Math.round((y / HEATMAP_CANVAS_HEIGHT) * (HEATMAP_GRID_HEIGHT - 1));
+
+    for (let dy = -HEATMAP_SMOOTH_RADIUS; dy <= HEATMAP_SMOOTH_RADIUS; dy++) {
+        for (let dx = -HEATMAP_SMOOTH_RADIUS; dx <= HEATMAP_SMOOTH_RADIUS; dx++) {
+            const px = gx + dx;
+            const py = gy + dy;
+
+            if (px < 0 || px >= HEATMAP_GRID_WIDTH || py < 0 || py >= HEATMAP_GRID_HEIGHT)
+                continue;
+
+            const squaredDist = (dx * dx) + (dy * dy);
+            const weight = Math.exp(-squaredDist / 4);
+            const index = (py * HEATMAP_GRID_WIDTH) + px;
+
+            refereeHeatmapGrid[index] += weight;
+
+            if (refereeHeatmapGrid[index] > refereeHeatmapMax)
+                refereeHeatmapMax = refereeHeatmapGrid[index];
+        }
+    }
+}
+
+function clearRefereeHeatmapData() {
+    refereeHeatmapGrid.fill(0);
+    refereeHeatmapMax = 0;
+}
+
+function renderRefereeHeatmap(projectedPoint = null) {
+    const canvas = document.getElementById('canvas-ref-heatmap');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    drawTopViewField(ctx, canvas.width, canvas.height);
+
+    if (!heatmapBufferCanvas) {
+        heatmapBufferCanvas = document.createElement('canvas');
+        heatmapBufferCanvas.width = HEATMAP_GRID_WIDTH;
+        heatmapBufferCanvas.height = HEATMAP_GRID_HEIGHT;
+    }
+
+    const bufferCtx = heatmapBufferCanvas.getContext('2d');
+    const image = bufferCtx.createImageData(HEATMAP_GRID_WIDTH, HEATMAP_GRID_HEIGHT);
+    const pixels = image.data;
+
+    for (let i = 0; i < refereeHeatmapGrid.length; i++) {
+        const value = refereeHeatmapGrid[i];
+        if (value <= 0 || refereeHeatmapMax <= 0)
+            continue;
+
+        const normalized = Math.max(0, Math.min(1, value / refereeHeatmapMax));
+        const [r, g, b, a] = heatColor(normalized);
+        const p = i * 4;
+
+        pixels[p] = r;
+        pixels[p + 1] = g;
+        pixels[p + 2] = b;
+        pixels[p + 3] = a;
+    }
+
+    bufferCtx.putImageData(image, 0, 0);
+
+    ctx.save();
+    ctx.globalAlpha = 0.78;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(heatmapBufferCanvas, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    if (projectedPoint) {
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(projectedPoint.x, projectedPoint.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+function drawTopViewField(ctx, width, height) {
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = 18;
+    const left = pad;
+    const top = pad;
+    const right = width - pad;
+    const bottom = height - pad;
+    const fieldW = right - left;
+    const fieldH = bottom - top;
+    const midX = left + (fieldW / 2);
+    const midY = top + (fieldH / 2);
+
+    ctx.fillStyle = '#1f7a3b';
+    ctx.fillRect(left, top, fieldW, fieldH);
+
+    for (let i = 0; i < 9; i++) {
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
+        ctx.fillRect(left + (i * fieldW / 9), top, fieldW / 9, fieldH);
+    }
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, top, fieldW, fieldH);
+
+    ctx.beginPath();
+    ctx.moveTo(midX, top);
+    ctx.lineTo(midX, bottom);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(midX, midY, Math.min(fieldW, fieldH) * 0.12, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const areaW = fieldW * 0.16;
+    const areaH = fieldH * 0.42;
+    const areaTop = midY - (areaH / 2);
+
+    ctx.strokeRect(left, areaTop, areaW, areaH);
+    ctx.strokeRect(right - areaW, areaTop, areaW, areaH);
+}
+
+function heatColor(t) {
+    const value = Math.max(0, Math.min(1, t));
+
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (value < 0.25) {
+        r = 0;
+        g = value * 4 * 255;
+        b = 255;
+    } else if (value < 0.5) {
+        r = 0;
+        g = 255;
+        b = (1 - ((value - 0.25) * 4)) * 255;
+    } else if (value < 0.75) {
+        r = (value - 0.5) * 4 * 255;
+        g = 255;
+        b = 0;
+    } else {
+        r = 255;
+        g = (1 - ((value - 0.75) * 4)) * 255;
+        b = 0;
+    }
+
+    const alpha = Math.min(245, Math.round(45 + (value * 200)));
+
+    return [r | 0, g | 0, b | 0, alpha];
+}
+
+function drawFieldCalibrationOverlay(src) {
+    for (let i = 0; i < fieldCalibrationPoints.length; i++) {
+        const point = fieldCalibrationPoints[i];
+        const center = new cv.Point(point.x, point.y);
+
+        cv.circle(src, center, 7, [0, 255, 255, 255], -1);
+        cv.circle(src, center, 10, [0, 0, 0, 255], 2);
+
+        cv.putText(
+            src,
+            `${i + 1}`,
+            new cv.Point(point.x + 10, point.y - 8),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            [255, 255, 255, 255],
+            2,
+            cv.LINE_AA
+        );
+
+        if (i > 0) {
+            const prev = fieldCalibrationPoints[i - 1];
+            cv.line(src, new cv.Point(prev.x, prev.y), center, [255, 255, 0, 255], 2, cv.LINE_AA);
+        }
+    }
+
+    if (fieldCalibrationPoints.length === 4) {
+        const first = fieldCalibrationPoints[0];
+        const last = fieldCalibrationPoints[3];
+        cv.line(src, new cv.Point(last.x, last.y), new cv.Point(first.x, first.y), [255, 255, 0, 255], 2, cv.LINE_AA);
+    }
 }

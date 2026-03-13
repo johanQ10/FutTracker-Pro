@@ -136,6 +136,24 @@ body {
 	gap: 10px;
 }
 
+.projection-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.projection-actions .btn-control {
+	font-size: 0.86rem;
+	padding: 10px 8px;
+}
+
+.projection-status {
+	margin: 0;
+	font-size: 0.84rem;
+	color: var(--text-soft);
+	line-height: 1.35;
+}
+
 .btn-control {
 	border: 1px solid #3f3f3f;
 	border-radius: 10px;
