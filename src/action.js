@@ -15,6 +15,28 @@ let teamAPossession = 0;
 let teamBPossession = 0;
 let umbralContrastPlayer = 1.0;
 let umbralContrastBall = 1.0;
+let currentRefereeFootPoint = null;
+
+const HEATMAP_CANVAS_WIDTH = 840;
+const HEATMAP_CANVAS_HEIGHT = 544;
+const HEATMAP_GRID_WIDTH = 140;
+const HEATMAP_GRID_HEIGHT = 90;
+const HEATMAP_SMOOTH_RADIUS = 3;
+
+let isCalibratingField = false;
+let fieldCalibrationPoints = [];
+let trackedFieldPoints = [];
+let fieldHomographyMat = null;
+let projectionConfidence = 0;
+let autoProjectionFrameCount = 0;
+let previousGrayFrame = null;
+let projectionMode = '3A';
+let projectionEdgeDetector = 'canny';
+
+let refereeHeatmapGrid = new Float32Array(HEATMAP_GRID_WIDTH * HEATMAP_GRID_HEIGHT);
+let refereeHeatmapMax = 0;
+let lastProjectedRefereePoint = null;
+let heatmapBufferCanvas = null;
 
 const distRgb = (a, b) => {
     const dr = a[0] - b[0];
@@ -102,6 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     setupPlaybackControls(video);
+    setupProjectionControls(video, canvas);
 
     video.addEventListener('play', () => {
         console.log('Video: play');
@@ -124,6 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopProcessing();
     });
 
+    renderRefereeHeatmap();
     toggleCanvas();
 });
 
@@ -207,6 +231,19 @@ function reset() {
     teamAPossession = 0;
     teamBPossession = 0;
 
+    currentRefereeFootPoint = null;
+    lastProjectedRefereePoint = null;
+    projectionConfidence = 0;
+    autoProjectionFrameCount = 0;
+    isCalibratingField = false;
+    fieldCalibrationPoints = [];
+    trackedFieldPoints = [];
+
+    clearRefereeHeatmapData();
+    releaseProjectionMemory();
+    updateProjectionStatus('Sin calibrar. Pausa el video y marca 4 puntos del campo.');
+    renderRefereeHeatmap();
+
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -236,23 +273,69 @@ function processImage(src) {
     let dst = new cv.Mat();
     let dstBall = new cv.Mat();
     let srcBall = new cv.Mat();
+    let srcHeatMap = new cv.Mat();
 
     src.copyTo(srcBall);
+    src.copyTo(srcHeatMap);
+
+    // sobelEdges(srcHeatMap);
 
     processBall(srcBall, dstBall);
-    processPlayers(src, dst);
+    // processPlayers(src, dst);
+    processRefereeProjection(src);
     processBallPossession(src);
 
     srcBall.delete();
     dstBall.delete();
+    srcHeatMap.delete();
     dst.delete();
 }
+
+function sobelEdges(src) {
+    const srcGray = new cv.Mat();
+    const gradX16 = new cv.Mat();
+    const gradY16 = new cv.Mat();
+    const absX = new cv.Mat();
+    const absY = new cv.Mat();
+    const edges = new cv.Mat();
+
+    cv.cvtColor(src, srcGray, cv.COLOR_RGBA2GRAY, 0);
+
+    cv.blur(srcGray, srcGray, new cv.Size(5, 5), new cv.Point(-1, -1), cv.BORDER_DEFAULT);
+    // cv.medianBlur(srcGray, srcGray, 3);
+
+    // ddepth recomendado: CV_16S para no perder signo
+    cv.Sobel(srcGray, gradX16, cv.CV_16S, 1, 0, 3, 1, 0, cv.BORDER_DEFAULT);
+    cv.Sobel(srcGray, gradY16, cv.CV_16S, 0, 1, 3, 1, 0, cv.BORDER_DEFAULT);
+
+    cv.convertScaleAbs(gradX16, absX);
+    cv.convertScaleAbs(gradY16, absY);
+
+    // combinación simple de magnitudes
+    cv.addWeighted(absX, 0.5, absY, 0.5, 0, edges);
+
+    gradX16.delete();
+    gradY16.delete();
+    absX.delete();
+    absY.delete();
+    srcGray.delete();
+
+    // cv.erode(edges, edges, cv.Mat.ones(3, 3, cv.CV_8U));
+    cv.dilate(edges, edges, cv.Mat.ones(3, 3, cv.CV_8U));
+
+    cv.threshold(edges, edges, 20, 255, cv.THRESH_BINARY);
+
+    processSteps(9, edges);
+}
+
 
 function processSteps(step, dst) {
     const element = document.getElementById(`view-step-${step}`);
     const canvas = document.getElementById(`canvas-step-${step}`);
 
-    if (element.checked)
+    if (step == 9)
+        cv.imshow(canvas, dst);
+    else if (element.checked)
         cv.imshow(canvas, dst);
 }
 
@@ -592,11 +675,17 @@ function contoursPlayersCv(cv, src, dst) {
     }
 
     if (referees.length > 0) {
-        if (isOverlayEnabled('overlay-referee')) {
-            const point1 = new cv.Point(referees[minIndex].rect.x - offset, referees[minIndex].rect.y - offset);
-            const point2 = new cv.Point(referees[minIndex].rect.x + referees[minIndex].rect.width + offset, referees[minIndex].rect.y + referees[minIndex].rect.height + offset);
+        const selectedRef = referees[minIndex];
+        currentRefereeFootPoint = new cv.Point(
+            selectedRef.rect.x + (selectedRef.rect.width / 2),
+            selectedRef.rect.y + selectedRef.rect.height
+        );
 
-            cv.rectangle(src, point1, point2, referees[minIndex].color, 4);
+        if (isOverlayEnabled('overlay-referee')) {
+            const point1 = new cv.Point(selectedRef.rect.x - offset, selectedRef.rect.y - offset);
+            const point2 = new cv.Point(selectedRef.rect.x + selectedRef.rect.width + offset, selectedRef.rect.y + selectedRef.rect.height + offset);
+
+            cv.rectangle(src, point1, point2, selectedRef.color, 4);
 
             const text = 'Referee';
             const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
@@ -618,11 +707,13 @@ function contoursPlayersCv(cv, src, dst) {
                 textOrg,
                 cv.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                referees[minIndex].color,
+                selectedRef.color,
                 2,
                 cv.LINE_AA
             );
         }
+    } else {
+        currentRefereeFootPoint = null;
     }
 
     if (ballPoint1 != null && ballPoint2 != null) {
@@ -857,4 +948,834 @@ function distance(p1, p2) {
 function isOverlayEnabled(id) {
     const control = document.getElementById(id);
     return !control || control.checked;
+}
+
+function setupProjectionControls(video, canvas) {
+    const calibrateButton = document.getElementById('btn-calibrate-field');
+    const clearHeatmapButton = document.getElementById('btn-clear-ref-heatmap');
+    const projectionModeSelect = document.getElementById('projection-mode');
+    const projectionEdgeDetectorSelect = document.getElementById('projection-edge-detector');
+
+    if (projectionModeSelect) {
+        projectionModeSelect.addEventListener('change', (event) => {
+            projectionMode = event.target.value === '3B' ? '3B' : '3A';
+            releasePreviousGrayFrame();
+
+            if (projectionMode === '3B') {
+                updateProjectionStatus('Modo 3B activo. Estimando homografía automática por líneas del campo.');
+            } else {
+                updateProjectionStatus(fieldHomographyMat ? 'Modo 3A activo. Tracking desde calibración manual.' : 'Modo 3A activo. Pausa y calibra 4 puntos.');
+            }
+        });
+    }
+
+    if (projectionEdgeDetectorSelect) {
+        projectionEdgeDetectorSelect.addEventListener('change', (event) => {
+            const value = String(event.target.value || 'canny').toLowerCase();
+            projectionEdgeDetector = (value === 'sobel' || value === 'prewitt') ? value : 'canny';
+            if (projectionMode === '3B') {
+                updateProjectionStatus(`Modo 3B activo. Detector: ${projectionEdgeDetector}.`);
+            }
+        });
+    }
+
+    if (calibrateButton) {
+        calibrateButton.addEventListener('click', () => {
+            if (!video || (!video.src && video.readyState === 0)) {
+                updateProjectionStatus('Carga un video antes de calibrar.');
+                return;
+            }
+
+            if (!video.paused) {
+                updateProjectionStatus('Pausa el video para marcar los 4 puntos.');
+                return;
+            }
+
+            isCalibratingField = true;
+            fieldCalibrationPoints = [];
+            trackedFieldPoints = [];
+            projectionConfidence = 0;
+            updateProjectionStatus('Calibración activa: marca 4 puntos (sup-izq, sup-der, inf-der, inf-izq).');
+        });
+    }
+console.log('setupProjectionControls 3');
+    if (clearHeatmapButton) {
+        clearHeatmapButton.addEventListener('click', () => {
+            clearRefereeHeatmapData();
+            renderRefereeHeatmap(lastProjectedRefereePoint);
+            updateProjectionStatus(fieldHomographyMat ? 'Mapa reiniciado.' : 'Mapa limpiado. Falta calibrar.');
+        });
+    }
+console.log('setupProjectionControls 4');
+    if (canvas) {
+        canvas.addEventListener('click', (event) => {
+            if (!isCalibratingField) return;
+
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+
+            const x = ((event.clientX - rect.left) * canvas.width) / rect.width;
+            const y = ((event.clientY - rect.top) * canvas.height) / rect.height;
+
+            fieldCalibrationPoints.push({ x, y });
+
+            if (fieldCalibrationPoints.length < 4) {
+                updateProjectionStatus(`Punto ${fieldCalibrationPoints.length}/4 marcado.`);
+                return;
+            }
+
+            isCalibratingField = false;
+            trackedFieldPoints = fieldCalibrationPoints.map((p) => ({ x: p.x, y: p.y }));
+
+            const ok = updateHomographyFromPoints(trackedFieldPoints);
+            if (!ok) {
+                updateProjectionStatus('No se pudo calcular la homografía. Repite calibración.');
+                return;
+            }
+
+            projectionConfidence = 1;
+            clearRefereeHeatmapData();
+            lastProjectedRefereePoint = null;
+            renderRefereeHeatmap();
+            releasePreviousGrayFrame();
+            updateProjectionStatus('Calibrado. 3A activo: seguimiento automático de puntos.');
+        });
+    }
+}
+
+function processRefereeProjection(src) {//here
+    if (isCalibratingField || fieldCalibrationPoints.length > 0 || trackedFieldPoints.length === 4) {
+        console.log('processRefereeProjection 1');
+        drawFieldCalibrationOverlay(src, trackedFieldPoints.length === 4 ? trackedFieldPoints : fieldCalibrationPoints);
+    }
+
+    if (projectionMode === '3B') {
+        console.log('processRefereeProjection 2');
+        updateHomographyAuto3B(src);
+    }
+    else {
+        console.log('processRefereeProjection 3');
+        updateHomographyAuto3A(src);
+    }
+
+    if (!fieldHomographyMat || !currentRefereeFootPoint) {
+        console.log('processRefereeProjection 4');
+        renderRefereeHeatmap(lastProjectedRefereePoint);
+        return;
+    }
+
+    const projected = projectPointToTopView(currentRefereeFootPoint);
+    if (!projected) {
+        console.log('processRefereeProjection 5');
+        renderRefereeHeatmap(lastProjectedRefereePoint);
+        return;
+    }
+
+    lastProjectedRefereePoint = projected;
+
+    if (projectionConfidence >= 0.55)
+        accumulateRefereeHeatmap(projected.x, projected.y);
+
+    renderRefereeHeatmap(projected);
+}
+
+function updateHomographyAuto3A(src) {
+    console.log('updateHomographyAuto3A 1');
+    const autoControl = document.getElementById('projection-auto-track');
+    const autoEnabled = !autoControl || autoControl.checked;
+
+    if (!autoEnabled || trackedFieldPoints.length !== 4 || !fieldHomographyMat) {
+        releasePreviousGrayFrame();
+        return;
+    }
+console.log('updateHomographyAuto3A 2');
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+    if (!previousGrayFrame) {
+        previousGrayFrame = gray.clone();
+        gray.delete();
+        return;
+    }
+console.log('updateHomographyAuto3A 3');
+    const prevPtsData = [];
+    for (const p of trackedFieldPoints)
+        prevPtsData.push(p.x, p.y);
+
+    const prevPts = cv.matFromArray(4, 1, cv.CV_32FC2, prevPtsData);
+    const nextPts = new cv.Mat();
+    const status = new cv.Mat();
+    const err = new cv.Mat();
+    const winSize = new cv.Size(21, 21);
+    const maxLevel = 3;
+    const termCriteria = new cv.TermCriteria(cv.TermCriteria_EPS + cv.TermCriteria_COUNT, 30, 0.01);
+console.log('updateHomographyAuto3A 4');
+    cv.calcOpticalFlowPyrLK(previousGrayFrame, gray, prevPts, nextPts, status, err, winSize, maxLevel, termCriteria);
+console.log('updateHomographyAuto3A 5');
+    const tracked = [];
+    let validCount = 0;
+
+    for (let i = 0; i < 4; i++) {
+        if (status.data[i] === 1) {
+            tracked.push({ x: nextPts.data32F[i * 2], y: nextPts.data32F[i * 2 + 1] });
+            validCount++;
+        } else {
+            tracked.push({ x: trackedFieldPoints[i].x, y: trackedFieldPoints[i].y });
+        }
+    }
+console.log('updateHomographyAuto3A 6');
+    const geomOk = isValidQuadrilateral(tracked, src.cols, src.rows);
+
+    if (validCount >= 3 && geomOk) {
+        trackedFieldPoints = tracked;
+        const hOk = updateHomographyFromPoints(trackedFieldPoints);
+        projectionConfidence = hOk ? computeProjectionConfidence(validCount, trackedFieldPoints, src.cols, src.rows) : 0;
+    } else {
+        projectionConfidence *= 0.92;
+    }
+console.log('updateHomographyAuto3A 7');
+    if (autoProjectionFrameCount % 15 === 0)
+        refineTrackingWithFieldLines(src);
+
+    autoProjectionFrameCount++;
+
+    previousGrayFrame.delete();
+    previousGrayFrame = gray.clone();
+console.log('updateHomographyAuto3A 8');
+    prevPts.delete();
+    nextPts.delete();
+    status.delete();
+    err.delete();
+    gray.delete();
+}
+
+function updateHomographyAuto3B(src) {
+    console.log('updateHomographyAuto3B 1');
+    const detectedQuad = detectFieldQuadrilateralFromLines(src);
+
+    if (!detectedQuad) {
+        projectionConfidence *= 0.92;
+        return;
+    }
+
+    if (!isValidQuadrilateral(detectedQuad.points, src.cols, src.rows)) {
+        projectionConfidence *= 0.88;
+        return;
+    }
+
+    if (trackedFieldPoints.length === 4) {
+        trackedFieldPoints = smoothTrackedPoints(trackedFieldPoints, detectedQuad.points, 0.3);
+    } else {
+        trackedFieldPoints = detectedQuad.points.map((p) => ({ x: p.x, y: p.y }));
+    }
+
+    const hOk = updateHomographyFromPoints(trackedFieldPoints);
+    if (!hOk) {
+        projectionConfidence *= 0.85;
+        return;
+    }
+
+    const lineScore = Math.max(0, Math.min(1, detectedQuad.lineCount / 16));
+    const areaScore = Math.max(0, Math.min(1, polygonArea(trackedFieldPoints) / (src.cols * src.rows * 0.12)));
+    projectionConfidence = Math.max(0, Math.min(1, (0.65 * lineScore) + (0.35 * areaScore)));
+}
+
+function detectFieldQuadrilateralFromLines(src) {
+    console.log('detectFieldQuadrilateralFromLines 1');
+    const rgb = new cv.Mat();
+    const hsv = new cv.Mat();
+    const whiteMask = new cv.Mat();
+    const greenMask = new cv.Mat();
+    const lineMask = new cv.Mat();
+    const edges = new cv.Mat();
+    const lines = new cv.Mat();
+
+    contrastCv(cv, src, src);
+
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB, 0);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV, 0);
+
+    const lowWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, 155, 0]);
+    const highWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 75, 255, 255]);
+    const lowGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [30, 30, 35, 0]);
+    const highGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [95, 255, 255, 255]);//here
+
+    cv.inRange(hsv, lowWhite, highWhite, whiteMask);
+    cv.inRange(hsv, lowGreen, highGreen, greenMask);
+
+    processSteps(9, whiteMask);
+
+    const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.dilate(greenMask, greenMask, kernel);
+    cv.bitwise_and(whiteMask, greenMask, lineMask);
+
+    buildProjectionEdges(lineMask, edges);
+
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 35, 35, 12);
+
+    const endpoints = [];
+
+    for (let i = 0; i < lines.rows; i++) {
+        const x1 = lines.data32S[i * 4];
+        const y1 = lines.data32S[i * 4 + 1];
+        const x2 = lines.data32S[i * 4 + 2];
+        const y2 = lines.data32S[i * 4 + 3];
+        const len = Math.hypot(x2 - x1, y2 - y1);
+
+        if (len < 45)
+            continue;
+
+        endpoints.push({ x: x1, y: y1 });
+        endpoints.push({ x: x2, y: y2 });
+    }
+
+    let result = null;
+
+    if (endpoints.length >= 8) {
+        const pointsData = [];
+        for (const point of endpoints)
+            pointsData.push(point.x, point.y);
+
+        const pointsMat = cv.matFromArray(endpoints.length, 1, cv.CV_32SC2, pointsData);
+        const hull = new cv.Mat();
+        cv.convexHull(pointsMat, hull, false, true);
+
+        const hullPoints = extractPointsFromSc2Mat(hull);
+        let quad = null;
+
+        if (hullPoints.length >= 4)
+            quad = buildQuadFromPoints(hullPoints);
+
+        if (!quad)
+            quad = buildQuadFromPoints(endpoints);
+
+        if (quad)
+            result = { points: quad, lineCount: Math.max(1, lines.rows) };
+
+        pointsMat.delete();
+        hull.delete();
+    }
+
+    rgb.delete();
+    hsv.delete();
+    whiteMask.delete();
+    greenMask.delete();
+    lineMask.delete();
+    edges.delete();
+    lines.delete();
+    lowWhite.delete();
+    highWhite.delete();
+    lowGreen.delete();
+    highGreen.delete();
+    kernel.delete();
+
+    return result;
+}
+
+function buildProjectionEdges(lineMask, edgesOut) {
+    if (projectionEdgeDetector === 'sobel') {
+        buildSobelEdges(lineMask, edgesOut);
+        return;
+    }
+
+    if (projectionEdgeDetector === 'prewitt') {
+        buildPrewittEdges(lineMask, edgesOut);
+        return;
+    }
+
+    cv.Canny(lineMask, edgesOut, 35, 120);
+}
+
+function buildSobelEdges(grayMask, edgesOut) {
+    const gradX16 = new cv.Mat();
+    const gradY16 = new cv.Mat();
+    const absX = new cv.Mat();
+    const absY = new cv.Mat();
+    const mix = new cv.Mat();
+
+    cv.Sobel(grayMask, gradX16, cv.CV_16S, 1, 0, 3, 1, 0, cv.BORDER_DEFAULT);
+    cv.Sobel(grayMask, gradY16, cv.CV_16S, 0, 1, 3, 1, 0, cv.BORDER_DEFAULT);
+
+    cv.convertScaleAbs(gradX16, absX);
+    cv.convertScaleAbs(gradY16, absY);
+    cv.addWeighted(absX, 0.5, absY, 0.5, 0, mix);
+    cv.threshold(mix, edgesOut, 55, 255, cv.THRESH_BINARY);
+
+    gradX16.delete();
+    gradY16.delete();
+    absX.delete();
+    absY.delete();
+    mix.delete();
+}
+
+function buildPrewittEdges(grayMask, edgesOut) {
+    const kx = cv.matFromArray(3, 3, cv.CV_32F, [
+        -1, 0, 1,
+        -1, 0, 1,
+        -1, 0, 1
+    ]);
+    const ky = cv.matFromArray(3, 3, cv.CV_32F, [
+        -1, -1, -1,
+         0,  0,  0,
+         1,  1,  1
+    ]);
+
+    const gx32 = new cv.Mat();
+    const gy32 = new cv.Mat();
+    const absX = new cv.Mat();
+    const absY = new cv.Mat();
+    const mix = new cv.Mat();
+
+    cv.filter2D(grayMask, gx32, cv.CV_32F, kx);
+    cv.filter2D(grayMask, gy32, cv.CV_32F, ky);
+
+    cv.convertScaleAbs(gx32, absX);
+    cv.convertScaleAbs(gy32, absY);
+    cv.addWeighted(absX, 0.5, absY, 0.5, 0, mix);
+    cv.threshold(mix, edgesOut, 55, 255, cv.THRESH_BINARY);
+
+    kx.delete();
+    ky.delete();
+    gx32.delete();
+    gy32.delete();
+    absX.delete();
+    absY.delete();
+    mix.delete();
+}
+
+function refineTrackingWithFieldLines(src) {
+    console.log('refineTrackingWithFieldLines 1');
+    if (trackedFieldPoints.length !== 4) return;
+
+    const rgb = new cv.Mat();
+    const hsv = new cv.Mat();
+    const whiteMask = new cv.Mat();
+    const edges = new cv.Mat();
+    const lines = new cv.Mat();
+console.log('refineTrackingWithFieldLines 2');
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB, 0);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV, 0);
+    const lowWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, 160, 0]);
+    const highWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 70, 255, 255]);
+    cv.inRange(hsv, lowWhite, highWhite, whiteMask);
+    cv.Canny(whiteMask, edges, 40, 130);
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 45, 45, 12);
+console.log('refineTrackingWithFieldLines 3');
+    let support = 0;
+    for (let i = 0; i < lines.rows; i++) {
+        const x1 = lines.data32S[i * 4];
+        const y1 = lines.data32S[i * 4 + 1];
+        const x2 = lines.data32S[i * 4 + 2];
+        const y2 = lines.data32S[i * 4 + 3];
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        if (len > 65) support++;
+    }
+console.log('refineTrackingWithFieldLines 4');
+    if (support < 2)
+        projectionConfidence *= 0.95;
+    else if (support > 6)
+        projectionConfidence = Math.min(1, projectionConfidence + 0.04);
+console.log('refineTrackingWithFieldLines 5');
+    rgb.delete();
+    hsv.delete();
+    whiteMask.delete();
+    edges.delete();
+    lines.delete();
+    lowWhite.delete();
+    highWhite.delete();
+}
+
+function updateHomographyFromPoints(points) {
+    console.log('updateHomographyFromPoints 1');
+    if (!points || points.length !== 4)
+        return false;
+
+    const srcData = [];
+    for (const p of points)
+        srcData.push(p.x, p.y);
+
+    const dstData = [
+        0, 0,
+        HEATMAP_CANVAS_WIDTH - 1, 0,
+        HEATMAP_CANVAS_WIDTH - 1, HEATMAP_CANVAS_HEIGHT - 1,
+        0, HEATMAP_CANVAS_HEIGHT - 1
+    ];
+
+    const srcMat = cv.matFromArray(4, 1, cv.CV_32FC2, srcData);
+    const dstMat = cv.matFromArray(4, 1, cv.CV_32FC2, dstData);
+    const h = cv.getPerspectiveTransform(srcMat, dstMat);
+    console.log('updateHomographyFromPoints 2');
+    if (fieldHomographyMat)
+        fieldHomographyMat.delete();
+
+    fieldHomographyMat = h;
+
+    srcMat.delete();
+    dstMat.delete();
+
+    return !!fieldHomographyMat;
+}
+
+function projectPointToTopView(point) {
+        
+    const srcPoint = cv.matFromArray(1, 1, cv.CV_32FC2, [point.x, point.y]);
+    const dstPoint = new cv.Mat();
+
+    cv.perspectiveTransform(srcPoint, dstPoint, fieldHomographyMat);
+
+    const x = dstPoint.data32F[0];
+    const y = dstPoint.data32F[1];
+
+    srcPoint.delete();
+    dstPoint.delete();
+
+    if (!Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+
+    return {
+        x: Math.max(0, Math.min(HEATMAP_CANVAS_WIDTH - 1, x)),
+        y: Math.max(0, Math.min(HEATMAP_CANVAS_HEIGHT - 1, y))
+    };
+}
+
+function drawFieldCalibrationOverlay(src, points) {
+    console.log('drawFieldCalibrationOverlay 1');
+    for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const center = new cv.Point(p.x, p.y);
+
+        cv.circle(src, center, 7, [0, 255, 255, 255], -1);
+        cv.circle(src, center, 10, [0, 0, 0, 255], 2);
+
+        cv.putText(src, `${i + 1}`, new cv.Point(p.x + 10, p.y - 8), cv.FONT_HERSHEY_SIMPLEX, 0.55, [255, 255, 255, 255], 2, cv.LINE_AA);
+
+        if (i > 0) {
+            const prev = points[i - 1];
+            cv.line(src, new cv.Point(prev.x, prev.y), center, [255, 255, 0, 255], 2, cv.LINE_AA);
+        }
+    }
+
+    if (points.length === 4) {
+        cv.line(src, new cv.Point(points[3].x, points[3].y), new cv.Point(points[0].x, points[0].y), [255, 255, 0, 255], 2, cv.LINE_AA);
+    }
+}
+
+function renderRefereeHeatmap(projectedPoint = null) {
+    console.log('renderRefereeHeatmap 1');
+    const canvas = document.getElementById('canvas-ref-heatmap');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    drawTopViewField(ctx, canvas.width, canvas.height);
+
+    if (!heatmapBufferCanvas) {
+        heatmapBufferCanvas = document.createElement('canvas');
+        heatmapBufferCanvas.width = HEATMAP_GRID_WIDTH;
+        heatmapBufferCanvas.height = HEATMAP_GRID_HEIGHT;
+    }
+    console.log('renderRefereeHeatmap 2');
+    const bufferCtx = heatmapBufferCanvas.getContext('2d');
+    const image = bufferCtx.createImageData(HEATMAP_GRID_WIDTH, HEATMAP_GRID_HEIGHT);
+
+    for (let i = 0; i < refereeHeatmapGrid.length; i++) {
+        if (refereeHeatmapMax <= 0 || refereeHeatmapGrid[i] <= 0)
+            continue;
+
+        const p = i * 4;
+        const t = Math.max(0, Math.min(1, refereeHeatmapGrid[i] / refereeHeatmapMax));
+        const color = heatColor(t);
+
+        image.data[p] = color[0];
+        image.data[p + 1] = color[1];
+        image.data[p + 2] = color[2];
+        image.data[p + 3] = color[3];
+    }
+
+    bufferCtx.putImageData(image, 0, 0);
+
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(heatmapBufferCanvas, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    console.log('renderRefereeHeatmap 3');
+    if (projectedPoint) {
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#111827';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(projectedPoint.x, projectedPoint.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    drawProjectionHud(ctx, canvas.width);
+    console.log('renderRefereeHeatmap 4');
+}
+
+function drawProjectionHud(ctx, width) {
+    console.log('drawProjectionHud 1');
+    const confidencePct = Math.round(Math.max(0, Math.min(1, projectionConfidence)) * 100);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+    ctx.fillRect(width - 228, 10, 218, 52);
+
+    ctx.fillStyle = '#f3f4f6';
+    ctx.font = '600 13px Barlow';
+    ctx.fillText(`${projectionMode} Confianza: ${confidencePct}%`, width - 216, 31);
+
+    ctx.fillStyle = projectionConfidence >= 0.55 ? '#22c55e' : '#f97316';
+    ctx.fillRect(width - 216, 40, Math.round(200 * Math.max(0, Math.min(1, projectionConfidence))), 8);
+    ctx.restore();
+}
+
+function drawTopViewField(ctx, width, height) {
+    console.log('drawTopViewField 1');
+    const pad = 16;
+    const left = pad;
+    const top = pad;
+    const fieldW = width - (pad * 2);
+    const fieldH = height - (pad * 2);
+    const midX = left + (fieldW / 2);
+    const midY = top + (fieldH / 2);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#1f7a3b';
+    ctx.fillRect(left, top, fieldW, fieldH);
+
+    for (let i = 0; i < 9; i++) {
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
+        ctx.fillRect(left + (i * fieldW / 9), top, fieldW / 9, fieldH);
+    }
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, top, fieldW, fieldH);
+
+    ctx.beginPath();
+    ctx.moveTo(midX, top);
+    ctx.lineTo(midX, top + fieldH);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(midX, midY, Math.min(fieldW, fieldH) * 0.12, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const areaW = fieldW * 0.16;
+    const areaH = fieldH * 0.42;
+    const areaTop = midY - (areaH / 2);
+    ctx.strokeRect(left, areaTop, areaW, areaH);
+    ctx.strokeRect(left + fieldW - areaW, areaTop, areaW, areaH);
+}
+
+function heatColor(value) {
+    console.log('heatColor 1');
+    const t = Math.max(0, Math.min(1, value));
+
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (t < 0.25) {
+        g = t * 4 * 255;
+        b = 255;
+    } else if (t < 0.5) {
+        g = 255;
+        b = (1 - ((t - 0.25) * 4)) * 255;
+    } else if (t < 0.75) {
+        r = (t - 0.5) * 4 * 255;
+        g = 255;
+    } else {
+        r = 255;
+        g = (1 - ((t - 0.75) * 4)) * 255;
+    }
+
+    const alpha = Math.min(245, Math.round(35 + (t * 210)));
+    return [r | 0, g | 0, b | 0, alpha];
+}
+
+function accumulateRefereeHeatmap(x, y) {
+    console.log('accumulateRefereeHeatmap 1');
+
+    const gx = Math.round((x / HEATMAP_CANVAS_WIDTH) * (HEATMAP_GRID_WIDTH - 1));
+    const gy = Math.round((y / HEATMAP_CANVAS_HEIGHT) * (HEATMAP_GRID_HEIGHT - 1));
+
+    for (let dy = -HEATMAP_SMOOTH_RADIUS; dy <= HEATMAP_SMOOTH_RADIUS; dy++) {
+        for (let dx = -HEATMAP_SMOOTH_RADIUS; dx <= HEATMAP_SMOOTH_RADIUS; dx++) {
+            const px = gx + dx;
+            const py = gy + dy;
+
+            if (px < 0 || px >= HEATMAP_GRID_WIDTH || py < 0 || py >= HEATMAP_GRID_HEIGHT)
+                continue;
+
+            const dist2 = (dx * dx) + (dy * dy);
+            const weight = Math.exp(-dist2 / 4);
+            const idx = (py * HEATMAP_GRID_WIDTH) + px;
+
+            refereeHeatmapGrid[idx] += weight;
+            if (refereeHeatmapGrid[idx] > refereeHeatmapMax)
+                refereeHeatmapMax = refereeHeatmapGrid[idx];
+        }
+    }
+}
+
+function clearRefereeHeatmapData() {
+    refereeHeatmapGrid.fill(0);
+    refereeHeatmapMax = 0;
+}
+
+function updateProjectionStatus(message) {
+    const status = document.getElementById('projection-status');
+    if (status)
+        status.textContent = message;
+}
+
+function releasePreviousGrayFrame() {
+    if (previousGrayFrame) {
+        previousGrayFrame.delete();
+        previousGrayFrame = null;
+    }
+}
+
+function releaseProjectionMemory() {
+    releasePreviousGrayFrame();
+
+    if (fieldHomographyMat) {
+        fieldHomographyMat.delete();
+        fieldHomographyMat = null;
+    }
+}
+
+function computeProjectionConfidence(validCount, points, width, height) {
+    console.log('computeProjectionConfidence 1');
+    const trackScore = validCount / 4;
+
+    let inside = 0;
+    for (const p of points) {
+        if (p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height)
+            inside++;
+    }
+
+    const insideScore = inside / 4;
+    const area = polygonArea(points);
+    const areaScore = Math.max(0, Math.min(1, area / (width * height * 0.08)));
+
+    return Math.max(0, Math.min(1, (0.5 * trackScore) + (0.25 * insideScore) + (0.25 * areaScore)));
+}
+
+function isValidQuadrilateral(points, width, height) {
+    console.log('isValidQuadrilateral 1');
+    if (!points || points.length !== 4)
+        return false;
+
+    for (const p of points) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+        if (p.x < -30 || p.x > width + 30 || p.y < -30 || p.y > height + 30) return false;
+    }
+
+    const area = polygonArea(points);
+    if (area < width * height * 0.01)
+        return false;
+
+    return true;
+}
+
+function polygonArea(points) {
+    console.log('polygonArea 1');
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        area += (p1.x * p2.y) - (p2.x * p1.y);
+    }
+    return Math.abs(area / 2);
+}
+
+function extractPointsFromSc2Mat(mat) {
+    console.log('extractPointsFromSc2Mat 1');
+    const points = [];
+    const data = mat.data32S;
+
+    if (!data || data.length < 2)
+        return points;
+
+    for (let i = 0; i < data.length; i += 2)
+        points.push({ x: data[i], y: data[i + 1] });
+
+    return points;
+}
+
+function buildQuadFromPoints(points) {
+    console.log('buildQuadFromPoints 1');
+    if (!points || points.length < 4)
+        return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const p of points) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    }
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const byQuadrant = [null, null, null, null];
+
+    for (const p of points) {
+        const q = (p.x >= cx ? 1 : 0) + (p.y >= cy ? 2 : 0);
+
+        if (!byQuadrant[q]) {
+            byQuadrant[q] = { x: p.x, y: p.y };
+            continue;
+        }
+
+        const prev = byQuadrant[q];
+        const prevDist = Math.hypot(prev.x - cx, prev.y - cy);
+        const currDist = Math.hypot(p.x - cx, p.y - cy);
+
+        if (currDist > prevDist)
+            byQuadrant[q] = { x: p.x, y: p.y };
+    }
+
+    const fallback = [
+        { x: minX, y: minY },
+        { x: maxX, y: minY },
+        { x: maxX, y: maxY },
+        { x: minX, y: maxY }
+    ];
+
+    const quad = [
+        byQuadrant[0] || fallback[0],
+        byQuadrant[1] || fallback[1],
+        byQuadrant[3] || fallback[2],
+        byQuadrant[2] || fallback[3]
+    ];
+
+    return orderQuadrilateralPoints(quad);
+}
+
+function orderQuadrilateralPoints(points) {
+    console.log('orderQuadrilateralPoints 1');
+    const sorted = points.slice().sort((a, b) => a.y - b.y);
+    const top = sorted.slice(0, 2).sort((a, b) => a.x - b.x);
+    const bottom = sorted.slice(2, 4).sort((a, b) => b.x - a.x);
+    return [top[0], top[1], bottom[0], bottom[1]];
+}
+
+function smoothTrackedPoints(previousPoints, newPoints, alpha) {
+    console.log('smoothTrackedPoints 1');
+    const a = Math.max(0, Math.min(1, alpha));
+
+    return previousPoints.map((p, i) => ({
+        x: ((1 - a) * p.x) + (a * newPoints[i].x),
+        y: ((1 - a) * p.y) + (a * newPoints[i].y)
+    }));
 }

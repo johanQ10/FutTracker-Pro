@@ -38,6 +38,30 @@
             </section>
 
             <section class="control-card">
+                <h2>Proyección Referee 3A</h2>
+                <label for="projection-mode" class="input-label">Modo automático</label>
+                <select id="projection-mode" class="projection-select" aria-label="Modo de proyeccion automatica">
+                    <option value="3A" selected>3A - Tracking desde calibración manual</option>
+                    <option value="3B">3B - Estimación automática por líneas</option>
+                </select>
+                <label for="projection-edge-detector" class="input-label">Detector de bordes (3B)</label>
+                <select id="projection-edge-detector" class="projection-select" aria-label="Detector de bordes para 3B">
+                    <option value="canny" selected>Canny</option>
+                    <option value="sobel">Sobel</option>
+                    <option value="prewitt">Prewitt</option>
+                </select>
+                <div class="projection-actions" role="group" aria-label="Controles de proyeccion">
+                    <button id="btn-calibrate-field" class="btn-control" type="button" title="Calibrar campo">Calibrar 4 puntos</button>
+                    <button id="btn-clear-ref-heatmap" class="btn-control" type="button" title="Limpiar mapa">Limpiar mapa</button>
+                </div>
+                <label class="checkbox-option" for="projection-auto-track">
+                    <input id="projection-auto-track" type="checkbox" checked>
+                    <span>3A Auto-track (Optical Flow)</span>
+                </label>
+                <p id="projection-status" class="projection-status">Sin calibrar. Pausa el video y marca 4 puntos del campo.</p>
+            </section>
+
+            <section class="control-card">
                 <h2>Contraste Jugadores</h2>
                 <label for="contrast-slider" class="input-label">Ajuste de contraste para umbralización</label>
                 <div class="range-row">
@@ -210,6 +234,20 @@
                     <h3>Paso 8: Contorno de Balón</h3>
                 </header>
                 <canvas id="canvas-step-8" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+
+            <section class="media-card" id="content-step-9">
+                <header>
+                    <h3>Paso 9: Extra</h3>
+                </header>
+                <canvas id="canvas-step-9" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+
+            <section class="media-card" id="content-ref-heatmap">
+                <header>
+                    <h3>Mapa de calor árbitro (vista superior)</h3>
+                </header>
+                <canvas id="canvas-ref-heatmap" class="canvas-design" width="840" height="544"></canvas>
             </section>
         </main>
     </div>
