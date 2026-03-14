@@ -38,6 +38,15 @@
             </section>
 
             <section class="control-card">
+                <h2>Equipos</h2>
+                <label for="team-a-name" class="input-label">Nombre equipo A</label>
+                <input id="team-a-name" type="text" placeholder="Equipo A" autocomplete="off" maxlength="40">
+
+                <label for="team-b-name" class="input-label">Nombre equipo B</label>
+                <input id="team-b-name" type="text" placeholder="Equipo B" autocomplete="off" maxlength="40">
+            </section>
+
+            <section class="control-card">
                 <h2>Contraste Jugadores</h2>
                 <label for="contrast-slider" class="input-label">Ajuste de contraste para umbralización</label>
                 <div class="range-row">
@@ -61,6 +70,11 @@
                     <label class="checkbox-option" for="overlay-possession">
                         <input id="overlay-possession" type="checkbox" checked>
                         <span>Posesión de balón</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-line-ups">
+                        <input id="overlay-line-ups" type="checkbox" checked>
+                        <span>Formaciones</span>
                     </label>
 
                     <label class="checkbox-option" for="overlay-team-a">

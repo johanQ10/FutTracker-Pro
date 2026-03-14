@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reset();
 
         video.src = URL.createObjectURL(file);
-        video.play();
+        // video.play();
     });
 
     setupPlaybackControls(video);
@@ -213,6 +213,7 @@ function reset() {
 }
 
 function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
+    if (first) return;
     if (!shouldContinue() || video.paused || video.ended) return;
     // 1. Get current frame from video
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -242,6 +243,7 @@ function processImage(src) {
     processBall(srcBall, dstBall);
     processPlayers(src, dst);
     processBallPossession(src);
+    processLineUp(src);
 
     srcBall.delete();
     dstBall.delete();
@@ -259,12 +261,14 @@ function processSteps(step, dst) {
 function processPlayers(src, dst) {
     contrastCv(cv, src, dst); processSteps(1, dst);
     umbralGreenCv(cv, dst, dst); processSteps(2, dst);
-    morfologyCv(cv, dst, 5);  processSteps(3, dst);
+    morfologyCv(cv, dst, !first ? 3 : 5);  processSteps(3, dst);
     maskGreenFieldCv(cv, dst);  processSteps(4, dst);
     contoursPlayersCv(cv, src, dst); processSteps(5, dst);
 }
 
 function processBall(src, dst) {
+    if (!first) return;
+
     contrastCv(cv, src, dst, true);
     umbralGreenCv(cv, dst, dst, true); processSteps(6, dst);
     maskGreenFieldCv(cv, dst);  processSteps(7, dst);
@@ -273,57 +277,153 @@ function processBall(src, dst) {
 
 function processBallPossession(src) {
     if (!isOverlayEnabled('overlay-possession')) return;
+    
+    const teamANameInput = document.getElementById('team-a-name').value.trim() || 'Team A';
+    const teamBNameInput = document.getElementById('team-b-name').value.trim() || 'Team B';
 
     const totalPossession = teamAPossession + teamBPossession;
+    const offsetSeparate = 25;
+
     const textPosA = new cv.Point(10, 70);
-    const textA = 'Team A: ' + (totalPossession <= 0 ? 0 : Math.round((teamAPossession * 100) / totalPossession)) + '%';
-    const textPosB = new cv.Point(10, 90);
-    const textB = 'Team B: ' + (totalPossession <= 0 ? 0 : Math.round((teamBPossession * 100) / totalPossession)) + '%';
+    const textPosB = new cv.Point(10, textPosA.y + offsetSeparate);
+    const textPosR = new cv.Point(10, textPosB.y + offsetSeparate);
+
+    const textA = teamANameInput + ': ' + (totalPossession <= 0 ? 0 : Math.round((teamAPossession * 100) / totalPossession)) + '%';
+    const textB = teamBNameInput + ': ' + (totalPossession <= 0 ? 0 : Math.round((teamBPossession * 100) / totalPossession)) + '%';
+    const textR = 'Referees';
+
     const fillWidth = 2;
-    const strokeWidth = 4;
+    const strokeWidth = 5;
+    const scaleFont = 0.8;
+    const lineType = cv.LINE_AA;
+    const fontType = cv.FONT_HERSHEY_SIMPLEX;
 
     cv.putText(
         src,
         textA,
         textPosA,
-        cv.FONT_HERSHEY_SIMPLEX,
-        0.6,
+        fontType,
+        scaleFont,
         [255, 255, 255, 255],
         strokeWidth,
-        cv.LINE_AA
+        lineType
     );
 
     cv.putText(
         src,
         textA,
         textPosA,
-        cv.FONT_HERSHEY_SIMPLEX,
-        0.6,
+        fontType,
+        scaleFont,
         intensityColorContrast(colorA[0], colorA[1], colorA[2]),
         fillWidth,
-        cv.LINE_AA
+        lineType
     );
 
     cv.putText(
         src,
         textB,
         textPosB,
-        cv.FONT_HERSHEY_SIMPLEX,
-        0.6,
+        fontType,
+        scaleFont,
         [255, 255, 255, 255],
         strokeWidth,
-        cv.LINE_AA
+        lineType
     );
 
     cv.putText(
         src,
         textB,
         textPosB,
-        cv.FONT_HERSHEY_SIMPLEX,
-        0.6,
+        fontType,
+        scaleFont,
         intensityColorContrast(colorB[0], colorB[1], colorB[2]),
         fillWidth,
-        cv.LINE_AA
+        lineType
+    );
+
+    cv.putText(
+        src,
+        textR,
+        textPosR,
+        fontType,
+        scaleFont,
+        [255, 255, 255, 255],
+        strokeWidth,
+        lineType
+    );
+
+    cv.putText(
+        src,
+        textR,
+        textPosR,
+        fontType,
+        scaleFont,
+        intensityColorContrast(colorR[0], colorR[1], colorR[2]),
+        fillWidth,
+        lineType
+    );
+}
+
+function processLineUp(src) {
+    if (!isOverlayEnabled('overlay-line-ups')) return;
+
+    const offsetSeparate = 25;
+
+    const textPosA = new cv.Point(canvasWidth - 100, 70);
+    const textPosB = new cv.Point(canvasWidth - 100, textPosA.y + offsetSeparate);
+
+    const textA = '0-0-0';
+    const textB = '0-0-0';
+
+    const fillWidth = 2;
+    const strokeWidth = 5;
+    const scaleFont = 0.8;
+    const lineType = cv.LINE_AA;
+    const fontType = cv.FONT_HERSHEY_SIMPLEX;
+
+    cv.putText(
+        src,
+        textA,
+        textPosA,
+        fontType,
+        scaleFont,
+        [255, 255, 255, 255],
+        strokeWidth,
+        lineType
+    );
+
+    cv.putText(
+        src,
+        textA,
+        textPosA,
+        fontType,
+        scaleFont,
+        intensityColorContrast(colorA[0], colorA[1], colorA[2]),
+        fillWidth,
+        lineType
+    );
+
+    cv.putText(
+        src,
+        textB,
+        textPosB,
+        fontType,
+        scaleFont,
+        [255, 255, 255, 255],
+        strokeWidth,
+        lineType
+    );
+
+    cv.putText(
+        src,
+        textB,
+        textPosB,
+        fontType,
+        scaleFont,
+        intensityColorContrast(colorB[0], colorB[1], colorB[2]),
+        fillWidth,
+        lineType
     );
 }
 
@@ -388,21 +488,8 @@ function contoursPlayersCv(cv, src, dst) {
     for (let i = 0; i < contours.size(); i++) {
         const contour = contours.get(i);
         const rect = cv.boundingRect(contour);
-        const contourArea = cv.contourArea(contour);
-        const rectArea = rect.width * rect.height;
-        const aspectRatio = rect.width / rect.height;
-        const fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
 
-        const condition = ((rect.width * 6) < rect.height) || 
-            ((rect.height * 3) < rect.width) || 
-            (rect.width > 200 || rect.height > 200) ||
-            (rect.height < 12) ||
-            (rectArea < 110) ||
-            (contourArea < 70) ||
-            (fillRatio < 0.26) ||
-            (aspectRatio > 3.2);
-
-        if (condition) {
+        if (!isPlayerCandidate(contour)) {
             cv.drawContours(dst, contours, i, new cv.Scalar(0, 0, 0, 255), cv.FILLED);
             contour.delete();
             continue;
@@ -432,6 +519,7 @@ function contoursPlayersCv(cv, src, dst) {
 
     const players = [];
     const referees = [];
+    const others = [];
 
     if (k >= 2) {
         const samplesArray = [];
@@ -453,10 +541,13 @@ function contoursPlayersCv(cv, src, dst) {
             centers
         );
 
-        let threshold = 50;
+        let threshold = 60;
 
         const { mergedCenters, mergedK } = mergeSimilarClusters(labels, centers, threshold);
         let centersFreq = Array.from({ length: mergedK }, (_, i) => [i, 0]);
+
+        let teamLeftCluster = -1;
+        let minX = canvasWidth;
 
         for (let i = 0; i < n; i++) {
             const rect = candidates[i].rect;
@@ -467,6 +558,11 @@ function contoursPlayersCv(cv, src, dst) {
 
             centersFreq[cluster][0] = cluster;
             centersFreq[cluster][1]++;
+
+            if (rect.x < minX) {
+                minX = rect.x;
+                teamLeftCluster = cluster;
+            }
 
             let r = mergedCenters[cluster][0] | 0;
             let g = mergedCenters[cluster][1] | 0;
@@ -505,11 +601,18 @@ function contoursPlayersCv(cv, src, dst) {
             if (isA) players.push({ rect, color: solidColor, type: 'A' });
             else if (isB) players.push({ rect, color: solidColor, type: 'B' });
             else if (isR) referees.push({ rect, color: solidColor, type: 'R' });
+            else others.push({ rect, color: solidColor, type: 'O' });
 
-            if ((isA && isOverlayEnabled('overlay-team-a')) || (isB && isOverlayEnabled('overlay-team-b'))) {
+            if ((isA && isOverlayEnabled('overlay-team-a')) || 
+                (isB && isOverlayEnabled('overlay-team-b')) || 
+                (!isR && !isA && !isB && !first)
+            ) {
+                console.log('Rectangle: ' + (rect.x + rect.width / 2) + ',' + (rect.y + rect.height) + ' Color: ' + solidColor);
                 cv.rectangle(src, point1, point2, solidColor, 4);
 
-                const text = isA ? 'Team A' : isB ? 'Team B' : '';
+                const teamANameInput = document.getElementById('team-a-name').value.trim() || 'Team A';
+                const teamBNameInput = document.getElementById('team-b-name').value.trim() || 'Team B';
+                const text = isA ? teamANameInput : isB ? teamBNameInput : '';
                 const textOrg = new cv.Point(point1.x - 15, point1.y - 10);
 
                 cv.putText(
@@ -539,16 +642,16 @@ function contoursPlayersCv(cv, src, dst) {
         centersFreq.sort((a, b) => b[1] - a[1]);
 
         if (!first && centersFreq.length >= 3) {
-            clusterA = centersFreq[0][0];
-            clusterB = centersFreq[1][0];
+            clusterA = centersFreq[teamLeftCluster][0];
+            clusterB = centersFreq[teamLeftCluster === 0 ? 1 : 0][0];
 
-            colorA[0] = mergedCenters[centersFreq[0][0]][0] | 0;
-            colorA[1] = mergedCenters[centersFreq[0][0]][1] | 0;
-            colorA[2] = mergedCenters[centersFreq[0][0]][2] | 0;
+            colorA[0] = mergedCenters[centersFreq[teamLeftCluster][0]][0] | 0;
+            colorA[1] = mergedCenters[centersFreq[teamLeftCluster][0]][1] | 0;
+            colorA[2] = mergedCenters[centersFreq[teamLeftCluster][0]][2] | 0;
 
-            colorB[0] = mergedCenters[centersFreq[1][0]][0] | 0;
-            colorB[1] = mergedCenters[centersFreq[1][0]][1] | 0;
-            colorB[2] = mergedCenters[centersFreq[1][0]][2] | 0;
+            colorB[0] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][0] | 0;
+            colorB[1] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][1] | 0;
+            colorB[2] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][2] | 0;
 
             clusterR = centersFreq[2][0];
 
@@ -557,6 +660,9 @@ function contoursPlayersCv(cv, src, dst) {
             colorR[2] = mergedCenters[centersFreq[2][0]][2] | 0;
 
             first = true;
+
+            console.log('Cluster A:', clusterA, 'Color A:', colorA);
+            console.log('Cluster B:', clusterB, 'Color B:', colorB);
         }
 
         samples.delete();
@@ -747,11 +853,6 @@ function mergeSimilarClusters(labels, centers, threshold = 30) {
     const k = centers.rows;
     const labelsData = labels.data32S; // Int32Array (n x 1)
 
-    if (!first) {
-        console.log('labelsData:', labelsData);
-        console.log('centers:', centers);
-    }
-
     const oldToNew = new Array(k).fill(-1);
     const mergedCenters = [];
 
@@ -788,6 +889,32 @@ function mergeSimilarClusters(labels, centers, threshold = 30) {
         mergedCenters, // array JS: [ [r,g,b], ... ]
         mergedK: mergedCenters.length
     };
+}
+
+function isPlayerCandidate(contour) {
+    const rect = cv.boundingRect(contour);
+    const contourArea = cv.contourArea(contour);
+    const rectArea = rect.width * rect.height;
+    const aspectRatio = rect.width / rect.height;
+    const fillRatio = rectArea > 0 ? contourArea / rectArea : 0;
+
+    if ((rect.width * 6) < rect.height) return false;
+    if ((rect.height * 3) < rect.width) return false;
+    if (rect.width > 200 || rect.height > 200) return false;
+
+    if (first) {
+        if (rectArea < 110) return false;
+        if (contourArea < 70) return false;
+        if (fillRatio < 0.26) return false;
+        if (aspectRatio > 3.2) return false;
+    }
+
+    const margin = !first ? 50 : 20;
+    const rightBottom = new cv.Point(rect.x + rect.width, rect.y + rect.height);
+
+    if (rightBottom.y + margin > canvasHeight) return false;
+
+    return true;
 }
 
 function isBallCandidate(contour) {
