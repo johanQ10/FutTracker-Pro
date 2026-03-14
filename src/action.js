@@ -15,6 +15,8 @@ let teamAPossession = 0;
 let teamBPossession = 0;
 let umbralContrastPlayer = 1.0;
 let umbralContrastBall = 1.0;
+let teamA = [];
+let teamB = [];
 
 const distRgb = (a, b) => {
     const dr = a[0] - b[0];
@@ -206,6 +208,8 @@ function reset() {
     first = false;
     teamAPossession = 0;
     teamBPossession = 0;
+    teamA = [];
+    teamB = [];
 
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
@@ -213,7 +217,7 @@ function reset() {
 }
 
 function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
-    if (first) return;
+    // if (first) return;
     if (!shouldContinue() || video.paused || video.ended) return;
     // 1. Get current frame from video
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -369,18 +373,27 @@ function processLineUp(src) {
     if (!isOverlayEnabled('overlay-line-ups')) return;
 
     const offsetSeparate = 25;
+    const offsetRight = 150;
 
-    const textPosA = new cv.Point(canvasWidth - 100, 70);
-    const textPosB = new cv.Point(canvasWidth - 100, textPosA.y + offsetSeparate);
-
-    const textA = '0-0-0';
-    const textB = '0-0-0';
+    const textPosA = new cv.Point(canvasWidth - offsetRight, 70);
+    const textPosB = new cv.Point(canvasWidth - offsetRight, textPosA.y + offsetSeparate);
 
     const fillWidth = 2;
     const strokeWidth = 5;
     const scaleFont = 0.8;
     const lineType = cv.LINE_AA;
     const fontType = cv.FONT_HERSHEY_SIMPLEX;
+
+    if (teamA.length === 0 || teamB.length === 0) return;
+
+    const resultA = estimateFormation(teamA, { attackDirection: 'leftToRight' });
+    const resultB = estimateFormation(teamB, { attackDirection: 'rightToLeft' });
+
+    console.log('Equipo A:', resultA.bestFormation, resultA.ranking);
+    console.log('Equipo B:', resultB.bestFormation, resultB.ranking);
+
+    const textA = resultA.bestFormation || '0-0-0';
+    const textB = resultB.bestFormation || '0-0-0';
 
     cv.putText(
         src,
@@ -607,7 +620,6 @@ function contoursPlayersCv(cv, src, dst) {
                 (isB && isOverlayEnabled('overlay-team-b')) || 
                 (!isR && !isA && !isB && !first)
             ) {
-                console.log('Rectangle: ' + (rect.x + rect.width / 2) + ',' + (rect.y + rect.height) + ' Color: ' + solidColor);
                 cv.rectangle(src, point1, point2, solidColor, 4);
 
                 const teamANameInput = document.getElementById('team-a-name').value.trim() || 'Team A';
@@ -663,6 +675,32 @@ function contoursPlayersCv(cv, src, dst) {
 
             console.log('Cluster A:', clusterA, 'Color A:', colorA);
             console.log('Cluster B:', clusterB, 'Color B:', colorB);
+
+            candidates.forEach(({ rect, color }) => {
+                const x = [color[0], color[1], color[2]];
+                const aC = [colorA[0], colorA[1], colorA[2]];
+                const bC = [colorB[0], colorB[1], colorB[2]];
+
+                let isATeam = false, isBTeam = false;
+
+                if (distRgb(x, aC) < threshold) {
+                    isATeam = true;
+                    r = colorA[0];
+                    g = colorA[1];
+                    b = colorA[2];
+                }
+                else if (distRgb(x, bC) < threshold) {
+                    isBTeam = true;
+                    r = colorB[0];
+                    g = colorB[1];
+                    b = colorB[2];
+                }
+                
+                if (isATeam)
+                    teamA.push({ x: rect.x + rect.width / 2, y: rect.y + rect.height });
+                else if (isBTeam)
+                    teamB.push({ x: rect.x + rect.width / 2, y: rect.y + rect.height });
+            });
         }
 
         samples.delete();
@@ -984,4 +1022,173 @@ function distance(p1, p2) {
 function isOverlayEnabled(id) {
     const control = document.getElementById(id);
     return !control || control.checked;
+}
+
+function isDepthCorrectionEnabled() {
+    const control = document.getElementById('toggle-depth-correction');
+    return !control || control.checked;
+}
+
+function estimateFormation(points, options = {}) {
+    const {
+        attackDirection = 'leftToRight',
+        candidates = [
+            [4, 3, 3],
+            [4, 2, 3, 1],
+            [4, 4, 2],
+            [3, 4, 3],
+            [3, 5, 2],
+            [4, 1, 4, 1],
+            [5, 3, 2],
+            [5, 4, 1],
+            [5, 1, 3, 1],
+            [3, 4, 2, 1],
+            [3, 1, 5, 1],
+            [3, 1, 4, 2],
+            [3, 2, 4, 1],
+            [3, 2, 3, 2],
+            [2, 4, 3, 1],
+            [1, 3, 4, 2],
+            [1, 3, 3, 3],
+            [2, 2, 3, 3],
+            [2, 2, 4, 2],
+        ]
+    } = options;
+
+    if (!Array.isArray(points) || points.length !== 10) {
+        // throw new Error('Se esperan exactamente 10 jugadores de campo.');
+    }
+
+    const xs = points.map((point) => point.x);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+
+    const players = points.map((point) => {
+        const depth = attackDirection === 'rightToLeft' ? maxX - point.x : point.x - minX;
+        return { ...point, depth };
+    });
+
+    players.sort((a, b) => a.depth - b.depth);
+
+    const results = candidates.map((shape) => {
+        const lines = splitPlayersByShape(players, shape);
+        const score = scoreShape(lines);
+
+        return {
+            formation: shape.join('-'),
+            score,
+            lines
+        };
+    });
+
+    results.sort((a, b) => a.score - b.score);
+
+    return {
+        bestFormation: results[0].formation,
+        bestScore: results[0].score,
+        ranking: results
+    };
+}
+
+function splitPlayersByShape(players, shape) {
+    const lines = [];
+    let start = 0;
+
+    for (const size of shape) {
+        const linePlayers = players.slice(start, start + size);
+        lines.push(linePlayers);
+        start += size;
+    }
+
+    return lines;
+}
+
+function scoreShape(lines) {
+    let compactnessPenalty = 0;
+    let separationReward = 0;
+    let balancePenalty = 0;
+    const useDepthCorrection = isDepthCorrectionEnabled();
+
+    let correctedLines = lines.map((line) =>
+        line.map((player) => ({
+            ...player,
+            depthCorrected: player.depth
+        }))
+    );
+
+    if (useDepthCorrection) {
+        const allPlayers = lines.flat();
+        const meanYAll = mean(allPlayers.map((player) => player.y));
+        const meanDepthAll = mean(allPlayers.map((player) => player.depth));
+
+        let covDepthY = 0;
+        let varY = 0;
+
+        for (const player of allPlayers) {
+            const dy = player.y - meanYAll;
+            const dd = player.depth - meanDepthAll;
+            covDepthY += dy * dd;
+            varY += dy * dy;
+        }
+
+        let perspectiveSlope = varY > 1e-6 ? covDepthY / varY : 0;
+
+        correctedLines = lines.map((line) =>
+            line.map((player) => ({
+                ...player,
+                depthCorrected: player.depth - perspectiveSlope * (player.y - meanYAll)
+            }))
+        );
+    } else {
+        correctedLines = lines.map((line) =>
+            line.map((player) => ({
+                ...player,
+                depthCorrected: player.depth
+            }))
+        );
+    }
+
+    const centers = correctedLines.map((line) => mean(line.map((player) => player.depthCorrected)));
+
+    for (const line of correctedLines) {
+        const depths = line.map((player) => player.depthCorrected);
+        const ys = line.map((player) => player.y);
+
+        compactnessPenalty += variance(depths) * 1.5;
+
+        if (line.length >= 2) {
+            const ySpread = Math.max(...ys) - Math.min(...ys);
+
+            if (ySpread < 35)
+                balancePenalty += (35 - ySpread) * 0.6;
+        }
+    }
+
+    for (let i = 1; i < centers.length; i++) {
+        const gap = centers[i] - centers[i - 1];
+
+        if (gap <= 0) {
+            separationReward -= 1000;
+            continue;
+        }
+
+        separationReward += Math.min(gap, 140) * 2;
+
+        if (gap < 20)
+            balancePenalty += (20 - gap) * 4;
+    }
+
+    console.log('Compactness Penalty:', compactnessPenalty.toFixed(2));
+    console.log('Separation Reward:', separationReward.toFixed(2));
+    console.log('Balance Penalty:', balancePenalty.toFixed(2));
+    return compactnessPenalty + balancePenalty - separationReward;
+}
+
+function mean(values) {
+    return values.reduce((acc, value) => acc + value, 0) / values.length;
+}
+
+function variance(values) {
+    const avg = mean(values);
+    return values.reduce((acc, value) => acc + (value - avg) ** 2, 0) / values.length;
 }
