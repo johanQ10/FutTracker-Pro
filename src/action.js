@@ -210,6 +210,7 @@ function reset() {
     clusterR = -1;
     count = 0;
     first = false;
+    isLineUpShow = false;
     teamAPossession = 0;
     teamBPossession = 0;
     teamA = [];
@@ -398,8 +399,10 @@ function processLineUp(src) {
     const resultA = estimateFormation(teamA, { attackDirection: 'leftToRight' });
     const resultB = estimateFormation(teamB, { attackDirection: 'rightToLeft' });
 
-    console.log('Equipo A:', resultA.bestFormation, resultA.ranking);
-    console.log('Equipo B:', resultB.bestFormation, resultB.ranking);
+    if (!first) {
+        console.log('Equipo A:', resultA.bestFormation, resultA.ranking);
+        console.log('Equipo B:', resultB.bestFormation, resultB.ranking);
+    }
 
     const textA = resultA.bestFormation || '0-0-0';
     const textB = resultB.bestFormation || '0-0-0';
@@ -563,7 +566,7 @@ function contoursPlayersCv(cv, src, dst) {
             centers
         );
 
-        let threshold = 60;
+        let threshold = 50;
 
         const { mergedCenters, mergedK } = mergeSimilarClusters(labels, centers, threshold);
         let centersFreq = Array.from({ length: mergedK }, (_, i) => [i, 0]);
@@ -679,6 +682,22 @@ function contoursPlayersCv(cv, src, dst) {
             colorR[0] = mergedCenters[centersFreq[2][0]][0] | 0;
             colorR[1] = mergedCenters[centersFreq[2][0]][1] | 0;
             colorR[2] = mergedCenters[centersFreq[2][0]][2] | 0;
+
+            let colorAvg = [ (colorA[0] + colorB[0]) / 2, (colorA[1] + colorB[1]) / 2, (colorA[2] + colorB[2]) / 2 ];
+
+            console.log('Color A:', colorA);
+            console.log('Color B:', colorB);
+            console.log('Color R:', colorR, 'Color Avg:', colorAvg);
+
+            if (distRgb(colorR, colorAvg) < threshold) {
+                clusterR = centersFreq[3][0];
+
+                colorR[0] = mergedCenters[centersFreq[3][0]][0] | 0;
+                colorR[1] = mergedCenters[centersFreq[3][0]][1] | 0;
+                colorR[2] = mergedCenters[centersFreq[3][0]][2] | 0;
+
+                console.log('Color R:', colorR);
+            }
 
             first = true;
 
@@ -966,7 +985,7 @@ function isPlayerCandidate(contour) {
 
 function isBallCandidate(contour) {
     const area = cv.contourArea(contour);
-    // Ajusta según resolución/zoom del video
+
     if (area < 6 || area > 140) return false;
 
     const peri = cv.arcLength(contour, true);
@@ -1187,9 +1206,11 @@ function scoreShape(lines) {
             balancePenalty += (20 - gap) * 4;
     }
 
-    console.log('Compactness Penalty:', compactnessPenalty.toFixed(2));
-    console.log('Separation Reward:', separationReward.toFixed(2));
-    console.log('Balance Penalty:', balancePenalty.toFixed(2));
+    if (!first) {
+        console.log('Compactness Penalty:', compactnessPenalty.toFixed(2));
+        console.log('Separation Reward:', separationReward.toFixed(2));
+        console.log('Balance Penalty:', balancePenalty.toFixed(2));
+    }
     return compactnessPenalty + balancePenalty - separationReward;
 }
 
