@@ -117,6 +117,11 @@
                         <span>Procesado</span>
                     </label>
 
+                    <label class="checkbox-option" for="view-inicial">
+                        <input id="view-inicial" type="checkbox" name="view" value="inicial" checked>
+                        <span>Inicial</span>
+                    </label>
+
                     <label class="checkbox-option" for="view-step-1">
                         <input id="view-step-1" type="checkbox" name="view" value="step1">
                         <span>Paso 1: Contraste</span>
@@ -173,6 +178,13 @@
                     <h3>Render procesado</h3>
                 </header>
                 <canvas id="canvas-output" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+
+            <section class="media-card" id="content-inicial">
+                <header>
+                    <h3>Inicial</h3>
+                </header>
+                <canvas id="canvas-inicial" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-1" style="display: none;">

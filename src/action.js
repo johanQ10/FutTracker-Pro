@@ -9,6 +9,7 @@ let clusterB = -1;
 let clusterR = -1;
 let count = 0;
 let first = false;
+let isLineUpShow = false;
 let ballPoint1;
 let ballPoint2;
 let teamAPossession = 0;
@@ -170,6 +171,9 @@ function toggleCanvas() {
     document.getElementById('view-procesado').addEventListener('change', (e) => {
         document.getElementById('content-procesado').style.display = e.target.checked ? 'grid' : 'none';
     });
+    document.getElementById('view-inicial').addEventListener('change', (e) => {
+        document.getElementById('content-inicial').style.display = e.target.checked ? 'grid' : 'none';
+    });
     document.getElementById('view-step-1').addEventListener('change', (e) => {
         document.getElementById('content-step-1').style.display = e.target.checked ? 'grid' : 'none';
     });
@@ -230,6 +234,11 @@ function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
     processImage(src);
     // 4. Show the result on the canvas
     cv.imshow(canvas, src);
+
+    if (!isLineUpShow) {
+        cv.imshow(document.getElementById('canvas-inicial'), src);
+        isLineUpShow = true;
+    }
     // 5. Free memory
     src.delete();
     // 6. Call the next frame
