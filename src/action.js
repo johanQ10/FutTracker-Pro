@@ -201,7 +201,6 @@ function toggleCanvas() {
 }
 
 function reset() {
-    isChanged = false;
     colorA = [ 0, 0, 0, 255 ];
     colorB = [ 0, 0, 0, 255 ]; 
     colorR = [ 0, 0, 0, 255 ];
@@ -236,7 +235,7 @@ function processVideo(video, canvas, ctx, shouldContinue, setAnimationId) {
     // 4. Show the result on the canvas
     cv.imshow(canvas, src);
 
-    if (!isLineUpShow) {
+    if (!isLineUpShow && first) {
         cv.imshow(document.getElementById('canvas-inicial'), src);
         isLineUpShow = true;
     }
@@ -304,7 +303,7 @@ function processBallPossession(src) {
 
     const textA = teamANameInput + ': ' + (totalPossession <= 0 ? 0 : Math.round((teamAPossession * 100) / totalPossession)) + '%';
     const textB = teamBNameInput + ': ' + (totalPossession <= 0 ? 0 : Math.round((teamBPossession * 100) / totalPossession)) + '%';
-    const textR = 'Referees';
+    const textR = 'Referee';
 
     const fillWidth = 2;
     const strokeWidth = 5;
@@ -399,7 +398,7 @@ function processLineUp(src) {
     const resultA = estimateFormation(teamA, { attackDirection: 'leftToRight' });
     const resultB = estimateFormation(teamB, { attackDirection: 'rightToLeft' });
 
-    if (!first) {
+    if (!isLineUpShow) {
         console.log('Equipo A:', resultA.bestFormation, resultA.ranking);
         console.log('Equipo B:', resultB.bestFormation, resultB.ranking);
     }
@@ -572,7 +571,8 @@ function contoursPlayersCv(cv, src, dst) {
         let centersFreq = Array.from({ length: mergedK }, (_, i) => [i, 0]);
 
         let teamLeftCluster = -1;
-        let minX = canvasWidth;
+        let minX = 10000;
+        let colorMin = [0, 0, 0, 255];
 
         for (let i = 0; i < n; i++) {
             const rect = candidates[i].rect;
@@ -587,6 +587,7 @@ function contoursPlayersCv(cv, src, dst) {
             if (rect.x < minX) {
                 minX = rect.x;
                 teamLeftCluster = cluster;
+                colorMin = [mergedCenters[cluster][0] | 0, mergedCenters[cluster][1] | 0, mergedCenters[cluster][2] | 0, 255];
             }
 
             let r = mergedCenters[cluster][0] | 0;
@@ -666,16 +667,19 @@ function contoursPlayersCv(cv, src, dst) {
         centersFreq.sort((a, b) => b[1] - a[1]);
 
         if (!first && centersFreq.length >= 3) {
-            clusterA = centersFreq[teamLeftCluster][0];
-            clusterB = centersFreq[teamLeftCluster === 0 ? 1 : 0][0];
+            let indexA = teamLeftCluster == centersFreq[0][0] ? 0 : 1;
+            let indexB = teamLeftCluster == centersFreq[0][0] ? 1 : 0;
 
-            colorA[0] = mergedCenters[centersFreq[teamLeftCluster][0]][0] | 0;
-            colorA[1] = mergedCenters[centersFreq[teamLeftCluster][0]][1] | 0;
-            colorA[2] = mergedCenters[centersFreq[teamLeftCluster][0]][2] | 0;
+            clusterA = centersFreq[indexA][0];
+            clusterB = centersFreq[indexB][0];
 
-            colorB[0] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][0] | 0;
-            colorB[1] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][1] | 0;
-            colorB[2] = mergedCenters[centersFreq[teamLeftCluster === 0 ? 1 : 0][0]][2] | 0;
+            colorA[0] = mergedCenters[centersFreq[indexA][0]][0] | 0;
+            colorA[1] = mergedCenters[centersFreq[indexA][0]][1] | 0;
+            colorA[2] = mergedCenters[centersFreq[indexA][0]][2] | 0;
+
+            colorB[0] = mergedCenters[centersFreq[indexB][0]][0] | 0;
+            colorB[1] = mergedCenters[centersFreq[indexB][0]][1] | 0;
+            colorB[2] = mergedCenters[centersFreq[indexB][0]][2] | 0;
 
             clusterR = centersFreq[2][0];
 
@@ -689,7 +693,7 @@ function contoursPlayersCv(cv, src, dst) {
             console.log('Color B:', colorB);
             console.log('Color R:', colorR, 'Color Avg:', colorAvg);
 
-            if (distRgb(colorR, colorAvg) < threshold) {
+            if (distRgb(colorR, colorAvg) < threshold && centersFreq.length >= 4) {
                 clusterR = centersFreq[3][0];
 
                 colorR[0] = mergedCenters[centersFreq[3][0]][0] | 0;
@@ -1206,12 +1210,12 @@ function scoreShape(lines) {
             balancePenalty += (20 - gap) * 4;
     }
 
-    if (!first) {
-        console.log('Compactness Penalty:', compactnessPenalty.toFixed(2));
-        console.log('Separation Reward:', separationReward.toFixed(2));
-        console.log('Balance Penalty:', balancePenalty.toFixed(2));
-    }
-    return compactnessPenalty + balancePenalty - separationReward;
+    let result = compactnessPenalty + balancePenalty - separationReward;
+
+    if (isNaN(result))
+        result = 100000;
+
+    return result;
 }
 
 function mean(values) {
