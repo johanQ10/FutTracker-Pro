@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (snapRadiusSlider) {
         const syncSnapRadius = () => {
             const rawValue = Number(snapRadiusSlider.value);
-            snapRadius = Math.max(10, Math.min(400, Math.round(rawValue)));
+            snapRadius = Math.max(10, Math.min(600, Math.round(rawValue)));
 
             if (snapRadiusValue)
                 snapRadiusValue.textContent = `${snapRadius}px`;
@@ -1773,7 +1773,7 @@ function snapPointToFieldStripe(point, radius = snapRadius) {
         }
     }
 
-    if (bestDistance > radius || !bestPoint)
+    if ((snapRadius >= 600 ? false : bestDistance > radius) || !bestPoint)
         return null;
 
     return bestPoint;
