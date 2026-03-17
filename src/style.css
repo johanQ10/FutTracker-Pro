@@ -113,13 +113,13 @@ body {
 	gap: 10px;
 }
 
-#contrast-slider, #contrast-slider-ball {
+#contrast-slider, #contrast-slider-ball, #snap-radius-slider {
 	width: 100%;
 	accent-color: #d8d8d8;
 	cursor: pointer;
 }
 
-#contrast-value, #contrast-value-ball {
+#contrast-value, #contrast-value-ball, #snap-radius-value {
 	min-width: 54px;
 	text-align: center;
 	font-size: 0.84rem;
@@ -186,6 +186,25 @@ body {
 
 #btn-reset:hover {
 	border-color: #4b95e8;
+}
+
+.btn-homography {
+	width: 100%;
+	font-size: 0.95rem;
+	padding: 10px 12px;
+	color: #ffe59d;
+	border-color: #7a6430;
+}
+
+.btn-homography:hover {
+	border-color: #d8b25f;
+}
+
+.homography-status {
+	margin: 0;
+	font-size: 0.83rem;
+	line-height: 1.4;
+	color: var(--text-soft);
 }
 
 input[type="file"] {

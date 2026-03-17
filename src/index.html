@@ -101,7 +101,28 @@
                         <input id="overlay-ball-box" type="checkbox" checked>
                         <span>Balón</span>
                     </label>
+
+                    <label class="checkbox-option" for="overlay-linear-heatmap">
+                        <input id="overlay-linear-heatmap" type="checkbox" checked>
+                        <span>Barra territorial 1D</span>
+                    </label>
+
+                    <label class="checkbox-option" for="overlay-field-stripes">
+                        <input id="overlay-field-stripes" type="checkbox" checked>
+                        <span>Debug franjas campo</span>
+                    </label>
                 </div>
+            </section>
+
+            <section class="control-card">
+                <h2>Homografia</h2>
+                <button id="btn-calibrate-homography" class="btn-control btn-homography" type="button">Calibrar 4 puntos</button>
+                <label for="snap-radius-slider" class="input-label">Radio de ajuste a franjas</label>
+                <div class="range-row">
+                    <input id="snap-radius-slider" type="range" min="10" max="600" step="1" value="50" aria-label="Radio de snap para homografia">
+                    <output id="snap-radius-value" for="snap-radius-slider" aria-live="polite">50px</output>
+                </div>
+                <p id="homography-status" class="homography-status">Calibra para mapear detecciones al campo real.</p>
             </section>
 
             <section class="control-card">
@@ -120,6 +141,11 @@
                     <label class="checkbox-option" for="view-inicial">
                         <input id="view-inicial" type="checkbox" name="view" value="inicial" checked>
                         <span>Inicial</span>
+                    </label>
+
+                    <label class="checkbox-option" for="view-step-0">
+                        <input id="view-step-0" type="checkbox" name="view" value="step0">
+                        <span>Paso 0: Debug</span>
                     </label>
 
                     <label class="checkbox-option" for="view-step-1">
@@ -185,6 +211,13 @@
                     <h3>Inicial</h3>
                 </header>
                 <canvas id="canvas-inicial" class="canvas-design" width="972" height="648"></canvas>
+            </section>
+
+            <section class="media-card" id="content-step-0" style="display: none;">
+                <header>
+                    <h3>Paso 0: Debug</h3>
+                </header>
+                <canvas id="canvas-step-0" class="canvas-design" width="972" height="648"></canvas>
             </section>
 
             <section class="media-card" id="content-step-1" style="display: none;">
