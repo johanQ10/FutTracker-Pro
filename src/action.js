@@ -1,6 +1,7 @@
 
 let canvasWidth = 0;
 let canvasHeight = 0;
+const colorBorderText = [0, 0, 0, 255];
 let colorA = [ 0, 0, 0, 255 ];
 let colorB = [ 0, 0, 0, 255 ];
 let colorR = [ 0, 0, 0, 255 ];
@@ -18,6 +19,29 @@ let umbralContrastPlayer = 1.0;
 let umbralContrastBall = 1.0;
 let teamA = [];
 let teamB = [];
+let framePlayers = [];
+let frameBallCenter = null;
+
+const FIELD_WIDTH_METERS = 105;
+const FIELD_HEIGHT_METERS = 68;
+const LINEAR_HEAT_BINS = 36;
+const LINEAR_HEAT_DECAY = 0.985;
+let linearHeatHistogram = Array(LINEAR_HEAT_BINS).fill(0);
+
+let homographyMode = false;
+let homographyImagePoints = [];
+let homographyMatrix = null;
+let homographyPrevGray = null;
+let homographyTrackedPoints = null;
+let fieldStripeLines = [];
+let fieldStripeCoverage = 0;
+let snapRadius = 50;
+const homographyFieldPoints = [
+    { x: 0, y: 0 },
+    { x: FIELD_WIDTH_METERS, y: 0 },
+    { x: FIELD_WIDTH_METERS, y: FIELD_HEIGHT_METERS },
+    { x: 0, y: FIELD_HEIGHT_METERS }
+];
 
 const distRgb = (a, b) => {
     const dr = a[0] - b[0];
@@ -30,11 +54,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('video-input');
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
+    const calibrateHomographyButton = document.getElementById('btn-calibrate-homography');
 
     const contrastSlider = document.getElementById('contrast-slider');
     const contrastValue = document.getElementById('contrast-value');
     const contrastSliderBall = document.getElementById('contrast-slider-ball');
     const contrastValueBall = document.getElementById('contrast-value-ball');
+    const snapRadiusSlider = document.getElementById('snap-radius-slider');
+    const snapRadiusValue = document.getElementById('snap-radius-value');
 
     let animationId = null;
     let isProcessing = false;
@@ -63,6 +90,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         contrastSliderBall.addEventListener('input', syncContrastBall);
         syncContrastBall();
+    }
+
+    if (snapRadiusSlider) {
+        const syncSnapRadius = () => {
+            const rawValue = Number(snapRadiusSlider.value);
+            snapRadius = Math.max(10, Math.min(400, Math.round(rawValue)));
+
+            if (snapRadiusValue)
+                snapRadiusValue.textContent = `${snapRadius}px`;
+        };
+
+        snapRadiusSlider.addEventListener('input', syncSnapRadius);
+        syncSnapRadius();
     }
 
     function syncCanvasSizeWithVideo() {
@@ -105,6 +145,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     setupPlaybackControls(video);
+
+    if (calibrateHomographyButton) {
+        calibrateHomographyButton.addEventListener('click', () => {
+            homographyMode = true;
+            homographyImagePoints = [];
+            setHomographyStatus('Modo calibracion activo: click en 4 puntos del campo (sup-izq, sup-der, inf-der, inf-izq).');
+        });
+    }
+
+    canvas.addEventListener('click', (event) => {
+        if (!homographyMode) return;
+
+        const point = getCanvasPointFromEvent(canvas, event);
+        const snappedPoint = snapPointToFieldStripe(point);
+        homographyImagePoints.push(point);
+
+        if (snappedPoint)
+            homographyImagePoints[homographyImagePoints.length - 1] = snappedPoint;
+
+        if (homographyImagePoints.length < 4) {
+            setHomographyStatus(`Punto ${homographyImagePoints.length}/4 capturado.`);
+            return;
+        }
+
+        homographyMode = false;
+
+        if (rebuildHomographyFromImagePoints(homographyImagePoints)) {
+            setHomographyStatus('Homografia calibrada. Seguimiento activo para compensar paneo.');
+        } else {
+            setHomographyStatus('No se pudo calibrar la homografia. Repite la seleccion de puntos.');
+        }
+    });
 
     video.addEventListener('play', () => {
         console.log('Video: play');
@@ -174,6 +246,9 @@ function toggleCanvas() {
     document.getElementById('view-inicial').addEventListener('change', (e) => {
         document.getElementById('content-inicial').style.display = e.target.checked ? 'grid' : 'none';
     });
+    document.getElementById('view-step-0').addEventListener('change', (e) => {
+        document.getElementById('content-step-0').style.display = e.target.checked ? 'grid' : 'none';
+    });
     document.getElementById('view-step-1').addEventListener('change', (e) => {
         document.getElementById('content-step-1').style.display = e.target.checked ? 'grid' : 'none';
     });
@@ -214,6 +289,40 @@ function reset() {
     teamBPossession = 0;
     teamA = [];
     teamB = [];
+    framePlayers = [];
+    frameBallCenter = null;
+    linearHeatHistogram = Array(LINEAR_HEAT_BINS).fill(0);
+    homographyMode = false;
+    homographyImagePoints = [];
+    snapRadius = 50;
+    fieldStripeLines = [];
+    fieldStripeCoverage = 0;
+
+    const snapRadiusSlider = document.getElementById('snap-radius-slider');
+    const snapRadiusValue = document.getElementById('snap-radius-value');
+
+    if (snapRadiusSlider)
+        snapRadiusSlider.value = String(snapRadius);
+
+    if (snapRadiusValue)
+        snapRadiusValue.textContent = `${snapRadius}px`;
+
+    if (homographyMatrix) {
+        homographyMatrix.delete();
+        homographyMatrix = null;
+    }
+
+    if (homographyPrevGray) {
+        homographyPrevGray.delete();
+        homographyPrevGray = null;
+    }
+
+    if (homographyTrackedPoints) {
+        homographyTrackedPoints.delete();
+        homographyTrackedPoints = null;
+    }
+
+    setHomographyStatus('Homografia reiniciada. Calibra nuevamente para el nuevo video.');
 
     const canvas = document.getElementById('canvas-output');
     const ctx = canvas.getContext('2d');
@@ -253,9 +362,16 @@ function processImage(src) {
 
     src.copyTo(srcBall);
 
+    detectFieldWhiteStripes(src);
+    updateHomographyTracking(src);
+
     processBall(srcBall, dstBall);
     processPlayers(src, dst);
     processBallPossession(src);
+
+    drawFieldStripeDebug(src);
+    processLinearHeatBar(src);
+
     processLineUp(src);
 
     srcBall.delete();
@@ -267,7 +383,7 @@ function processSteps(step, dst) {
     const element = document.getElementById(`view-step-${step}`);
     const canvas = document.getElementById(`canvas-step-${step}`);
 
-    if (element.checked)
+    if (step === 0 || element.checked)
         cv.imshow(canvas, dst);
 }
 
@@ -317,7 +433,7 @@ function processBallPossession(src) {
         textPosA,
         fontType,
         scaleFont,
-        [255, 255, 255, 255],
+        colorBorderText,
         strokeWidth,
         lineType
     );
@@ -339,7 +455,7 @@ function processBallPossession(src) {
         textPosB,
         fontType,
         scaleFont,
-        [255, 255, 255, 255],
+        colorBorderText,
         strokeWidth,
         lineType
     );
@@ -361,7 +477,7 @@ function processBallPossession(src) {
         textPosR,
         fontType,
         scaleFont,
-        [255, 255, 255, 255],
+        colorBorderText,
         strokeWidth,
         lineType
     );
@@ -412,7 +528,7 @@ function processLineUp(src) {
         textPosA,
         fontType,
         scaleFont,
-        [255, 255, 255, 255],
+        colorBorderText,
         strokeWidth,
         lineType
     );
@@ -434,7 +550,7 @@ function processLineUp(src) {
         textPosB,
         fontType,
         scaleFont,
-        [255, 255, 255, 255],
+        colorBorderText,
         strokeWidth,
         lineType
     );
@@ -449,6 +565,70 @@ function processLineUp(src) {
         fillWidth,
         lineType
     );
+}
+
+function processLinearHeatBar(src) {
+    if (!isOverlayEnabled('overlay-linear-heatmap')) return;
+
+    if (homographyMatrix)
+        updateLinearHeatHistogramFromFrame();
+
+    const marginX = Math.round(canvasWidth * 0.12);
+    const barWidth = Math.max(240, canvasWidth - (marginX * 2));
+    const barHeight = 22;
+    const top = Math.max(70, canvasHeight - 54);
+    const left = marginX;
+    const segmentWidth = barWidth / LINEAR_HEAT_BINS;
+
+    cv.rectangle(
+        src,
+        new cv.Point(left - 2, top - 2),
+        new cv.Point(left + barWidth + 2, top + barHeight + 2),
+        [0, 0, 0, 180],
+        cv.FILLED
+    );
+
+    const maxBin = Math.max(...linearHeatHistogram, 1e-6);
+
+    for (let i = 0; i < LINEAR_HEAT_BINS; i++) {
+        const normalized = linearHeatHistogram[i] / maxBin;
+        const color = getHeatColor(normalized);
+        const x1 = left + Math.floor(i * segmentWidth);
+        const x2 = left + Math.ceil((i + 1) * segmentWidth);
+
+        cv.rectangle(
+            src,
+            new cv.Point(x1, top),
+            new cv.Point(x2, top + barHeight),
+            color,
+            cv.FILLED
+        );
+    }
+
+    const centerX = left + Math.floor(barWidth / 2);
+    cv.line(
+        src,
+        new cv.Point(centerX, top - 4),
+        new cv.Point(centerX, top + barHeight + 4),
+        [255, 255, 255, 255],
+        1,
+        cv.LINE_AA
+    );
+
+    const leftLoad = linearHeatHistogram.slice(0, Math.floor(LINEAR_HEAT_BINS / 2)).reduce((acc, value) => acc + value, 0);
+    const rightLoad = linearHeatHistogram.slice(Math.floor(LINEAR_HEAT_BINS / 2)).reduce((acc, value) => acc + value, 0);
+    const totalLoad = leftLoad + rightLoad;
+    const leftPct = totalLoad > 0 ? Math.round((leftLoad * 100) / totalLoad) : 50;
+    const rightPct = 100 - leftPct;
+
+    const statusText = homographyMatrix
+        ? `Inclinacion territorial: IZQ ${leftPct}% | DER ${rightPct}%`
+        : 'Inclinacion territorial: homografia no calibrada';
+
+    const textPos = new cv.Point(left, top - 10);
+
+    cv.putText(src, statusText, textPos, cv.FONT_HERSHEY_SIMPLEX, 0.55, [0, 0, 0, 255], 4, cv.LINE_AA);
+    cv.putText(src, statusText, textPos, cv.FONT_HERSHEY_SIMPLEX, 0.55, [235, 235, 235, 255], 2, cv.LINE_AA);
 }
 
 function blurCv(cv, src, dst) {
@@ -503,6 +683,8 @@ function maskGreenFieldCv(cv, dst) {
 }
 
 function contoursPlayersCv(cv, src, dst) {
+    framePlayers = [];
+
     let contours = new cv.MatVector();
     let hierarchy = new cv.Mat();
     cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -624,8 +806,14 @@ function contoursPlayersCv(cv, src, dst) {
 
             const solidColor = intensityColorContrast(r, g, b);//[r, g, b, 255]
 
-            if (isA) players.push({ rect, color: solidColor, type: 'A' });
-            else if (isB) players.push({ rect, color: solidColor, type: 'B' });
+            if (isA) {
+                players.push({ rect, color: solidColor, type: 'A' });
+                framePlayers.push({ x: rect.x + (rect.width / 2), y: rect.y + rect.height, type: 'A' });
+            }
+            else if (isB) {
+                players.push({ rect, color: solidColor, type: 'B' });
+                framePlayers.push({ x: rect.x + (rect.width / 2), y: rect.y + rect.height, type: 'B' });
+            }
             else if (isR) referees.push({ rect, color: solidColor, type: 'R' });
             else others.push({ rect, color: solidColor, type: 'O' });
 
@@ -646,7 +834,7 @@ function contoursPlayersCv(cv, src, dst) {
                     textOrg,
                     cv.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    [255, 255, 255, 255],
+                    colorBorderText,
                     4,
                     cv.LINE_AA
                 );
@@ -783,7 +971,7 @@ function contoursPlayersCv(cv, src, dst) {
                 textOrg,
                 cv.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                [255, 255, 255, 255],
+                colorBorderText,
                 4,
                 cv.LINE_AA
             );
@@ -867,6 +1055,8 @@ function contoursBallCv(cv, src, dst) {
         contour.delete();
     }
 
+    frameBallCenter = null;
+
     if (candidates.length === 0) {
         ballPoint1 = null;
         ballPoint2 = null;
@@ -881,6 +1071,7 @@ function contoursBallCv(cv, src, dst) {
     const rect = candidates[0].rect;
     ballPoint1 = new cv.Point(rect.x - offset, rect.y - offset);
     ballPoint2 = new cv.Point(rect.x + rect.width + offset, rect.y + rect.height + offset);
+    frameBallCenter = { x: rect.x + (rect.width / 2), y: rect.y + (rect.height / 2) };
 
     contours.delete();
     hierarchy.delete();
@@ -1225,4 +1416,390 @@ function mean(values) {
 function variance(values) {
     const avg = mean(values);
     return values.reduce((acc, value) => acc + (value - avg) ** 2, 0) / values.length;
+}
+
+// --- Heatmap --- //
+function setHomographyStatus(message) {
+    const statusLabel = document.getElementById('homography-status');
+
+    if (statusLabel)
+        statusLabel.textContent = message;
+}
+
+function getCanvasPointFromEvent(canvas, event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    return {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY
+    };
+}
+
+function rebuildHomographyFromImagePoints(imagePoints) {
+    const matrix = buildHomographyMatrix(imagePoints, homographyFieldPoints);
+
+    if (!matrix)
+        return false;
+
+    if (homographyMatrix)
+        homographyMatrix.delete();
+
+    homographyMatrix = matrix;
+    rebuildTrackedPointsMat();
+
+    if (homographyPrevGray) {
+        homographyPrevGray.delete();
+        homographyPrevGray = null;
+    }
+
+    return true;
+}
+
+function buildHomographyMatrix(imagePoints, fieldPoints) {
+    if (!Array.isArray(imagePoints) || imagePoints.length !== 4)
+        return null;
+
+    const srcData = [];
+    const dstData = [];
+
+    for (let i = 0; i < 4; i++) {
+        srcData.push(imagePoints[i].x, imagePoints[i].y);
+        dstData.push(fieldPoints[i].x, fieldPoints[i].y);
+    }
+
+    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, srcData);
+    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, dstData);
+    let matrix = null;
+
+    try {
+        matrix = cv.getPerspectiveTransform(srcPts, dstPts);
+    } catch (error) {
+        matrix = null;
+    }
+
+    srcPts.delete();
+    dstPts.delete();
+
+    if (!matrix || matrix.rows !== 3 || matrix.cols !== 3)
+        return null;
+
+    return matrix;
+}
+
+function rebuildTrackedPointsMat() {
+    if (homographyTrackedPoints) {
+        homographyTrackedPoints.delete();
+        homographyTrackedPoints = null;
+    }
+
+    if (!homographyImagePoints || homographyImagePoints.length !== 4)
+        return;
+
+    const data = [];
+
+    for (const point of homographyImagePoints)
+        data.push(point.x, point.y);
+
+    homographyTrackedPoints = cv.matFromArray(4, 1, cv.CV_32FC2, data);
+}
+
+function updateHomographyTracking(src) {
+    if (!homographyMatrix || !homographyTrackedPoints) return;
+    if (typeof cv.calcOpticalFlowPyrLK !== 'function') return;
+
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+    if (!homographyPrevGray) {
+        homographyPrevGray = gray.clone();
+        gray.delete();
+        return;
+    }
+
+    const nextPoints = new cv.Mat();
+    const status = new cv.Mat();
+    const err = new cv.Mat();
+
+    cv.calcOpticalFlowPyrLK(
+        homographyPrevGray,
+        gray,
+        homographyTrackedPoints,
+        nextPoints,
+        status,
+        err
+    );
+
+    const updatedPoints = [];
+    let validPoints = 0;
+
+    for (let i = 0; i < 4; i++) {
+        const valid = status.ucharAt(i, 0) === 1;
+        const x = nextPoints.data32F[i * 2];
+        const y = nextPoints.data32F[(i * 2) + 1];
+
+        if (valid && Number.isFinite(x) && Number.isFinite(y)) {
+            const snappedPoint = snapPointToFieldStripe({ x, y });
+            updatedPoints.push(snappedPoint || { x, y });
+            validPoints++;
+        }
+    }
+
+    if (validPoints === 4) {
+        homographyImagePoints = updatedPoints;
+
+        const updatedMatrix = buildHomographyMatrix(homographyImagePoints, homographyFieldPoints);
+
+        if (updatedMatrix) {
+            if (homographyMatrix)
+                homographyMatrix.delete();
+
+            homographyMatrix = updatedMatrix;
+
+            if (homographyTrackedPoints)
+                homographyTrackedPoints.delete();
+
+            homographyTrackedPoints = nextPoints.clone();
+        }
+    }
+
+    if (homographyPrevGray)
+        homographyPrevGray.delete();
+
+    homographyPrevGray = gray.clone();
+
+    nextPoints.delete();
+    status.delete();
+    err.delete();
+    gray.delete();
+}
+
+function projectPointToField(point) {
+    if (!homographyMatrix || !point) return null;
+
+    const srcPoint = cv.matFromArray(1, 1, cv.CV_32FC2, [point.x, point.y]);
+    const dstPoint = new cv.Mat();
+
+    cv.perspectiveTransform(srcPoint, dstPoint, homographyMatrix);
+
+    const x = dstPoint.data32F[0];
+    const y = dstPoint.data32F[1];
+
+    srcPoint.delete();
+    dstPoint.delete();
+
+    if (!Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+
+    return { x, y };
+}
+
+function updateLinearHeatHistogramFromFrame() {
+    linearHeatHistogram = linearHeatHistogram.map((value) => value * LINEAR_HEAT_DECAY);
+
+    const samples = [];
+
+    if (frameBallCenter)
+        samples.push({ point: frameBallCenter, weight: 3.0 });
+
+    for (const player of framePlayers)
+        samples.push({ point: player, weight: 0.75 });
+
+    for (const sample of samples) {
+        const fieldPoint = projectPointToField(sample.point);
+
+        if (!fieldPoint) continue;
+        if (fieldPoint.x < -8 || fieldPoint.x > FIELD_WIDTH_METERS + 8) continue;
+
+        const normalizedX = Math.max(0, Math.min(0.9999, fieldPoint.x / FIELD_WIDTH_METERS));
+        const index = Math.floor(normalizedX * LINEAR_HEAT_BINS);
+
+        linearHeatHistogram[index] += sample.weight;
+    }
+}
+
+function getHeatColor(t) {
+    const value = Math.max(0, Math.min(1, t));
+
+    const r = Math.round(40 + (215 * value));
+    const g = Math.round(55 + (95 * Math.max(0, 1 - Math.abs(value - 0.5) * 2)));
+    const b = Math.round(135 - (95 * value));
+
+    return [r, g, b, 255];
+}
+
+function detectFieldWhiteStripes(src) {
+    const shouldDetect = isOverlayEnabled('overlay-field-stripes') || homographyMode || !!homographyMatrix;
+
+    if (!shouldDetect) {
+        fieldStripeLines = [];
+        fieldStripeCoverage = 0;
+        return;
+    }
+
+    const rgb = new cv.Mat();
+    const hsv = new cv.Mat();
+    const whiteMask = new cv.Mat();
+    const greenMask = new cv.Mat();
+    const whiteOnField = new cv.Mat();
+    const edges = new cv.Mat();
+    const lines = new cv.Mat();
+
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB, 0);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV, 0);
+
+    const lowerWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, 170, 0]);
+    const upperWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 70, 255, 255]);
+    const lowerGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [30, 20, 40, 0]);
+    const upperGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [95, 255, 255, 255]);
+
+    cv.inRange(hsv, lowerWhite, upperWhite, whiteMask);
+    cv.inRange(hsv, lowerGreen, upperGreen, greenMask);
+
+    const kernelField = cv.Mat.ones(9, 9, cv.CV_8U);
+    cv.dilate(greenMask, greenMask, kernelField);
+    cv.erode(greenMask, greenMask, kernelField);
+    cv.erode(greenMask, greenMask, kernelField);
+    cv.dilate(greenMask, greenMask, kernelField);
+    cv.dilate(greenMask, greenMask, kernelField);
+    
+    cv.bitwise_and(whiteMask, greenMask, whiteOnField);
+
+    const kernelClean = cv.Mat.ones(3, 3, cv.CV_8U);
+    // cv.morphologyEx(whiteOnField, whiteOnField, cv.MORPH_OPEN, kernelClean);
+    // cv.morphologyEx(whiteOnField, whiteOnField, cv.MORPH_CLOSE, kernelClean);
+
+    cv.Canny(whiteOnField, edges, 60, 130, 3, false);//here
+    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 28, 20, 12);
+
+    processSteps(0, edges);
+
+    const linesDetected = [];
+
+    for (let i = 0; i < lines.rows; i++) {
+        const x1 = lines.data32S[i * 4];
+        const y1 = lines.data32S[(i * 4) + 1];
+        const x2 = lines.data32S[(i * 4) + 2];
+        const y2 = lines.data32S[(i * 4) + 3];
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.hypot(dx, dy);
+
+        if (length < 24) continue;
+
+        linesDetected.push({ x1, y1, x2, y2, length });
+    }
+
+    const whitePixels = cv.countNonZero(whiteOnField);
+    const totalPixels = whiteOnField.rows * whiteOnField.cols;
+
+    fieldStripeCoverage = totalPixels > 0 ? whitePixels / totalPixels : 0;
+    fieldStripeLines = linesDetected;
+
+    rgb.delete();
+    hsv.delete();
+    whiteMask.delete();
+    greenMask.delete();
+    whiteOnField.delete();
+    edges.delete();
+    lines.delete();
+    lowerWhite.delete();
+    upperWhite.delete();
+    lowerGreen.delete();
+    upperGreen.delete();
+    kernelField.delete();
+    kernelClean.delete();
+}
+
+function drawFieldStripeDebug(src) {
+    if (!isOverlayEnabled('overlay-field-stripes') && !homographyMode) return;
+
+    for (const line of fieldStripeLines) {
+        cv.line(
+            src,
+            new cv.Point(line.x1, line.y1),
+            new cv.Point(line.x2, line.y2),
+            [0, 0, 0, 255],
+            2,
+            cv.LINE_AA
+        );
+    }
+
+    if (homographyImagePoints.length === 4) {
+        for (let i = 0; i < 4; i++) {
+            const a = homographyImagePoints[i];
+            const b = homographyImagePoints[(i + 1) % 4];
+
+            cv.line(
+                src,
+                new cv.Point(Math.round(a.x), Math.round(a.y)),
+                new cv.Point(Math.round(b.x), Math.round(b.y)),
+                [0, 220, 255, 255],
+                2,
+                cv.LINE_AA
+            );
+        }
+    }
+
+    for (let i = 0; i < homographyImagePoints.length; i++) {
+        const point = homographyImagePoints[i];
+        const color = i < 4 ? [0, 220, 255, 255] : [180, 180, 180, 255];
+
+        cv.circle(src, new cv.Point(Math.round(point.x), Math.round(point.y)), 6, colorBorderText, cv.FILLED, cv.LINE_AA);
+        cv.circle(src, new cv.Point(Math.round(point.x), Math.round(point.y)), 5, color, cv.FILLED, cv.LINE_AA);
+    }
+
+    const debugText = `Lineas campo: ${fieldStripeLines.length} | Cobertura blanca: ${(fieldStripeCoverage * 100).toFixed(2)}%`;
+    const textPos = new cv.Point(10, canvasHeight - 10);
+
+    cv.putText(src, debugText, textPos, cv.FONT_HERSHEY_SIMPLEX, 0.52, [0, 0, 0, 255], 4, cv.LINE_AA);
+    cv.putText(src, debugText, textPos, cv.FONT_HERSHEY_SIMPLEX, 0.52, [255, 255, 255, 255], 2, cv.LINE_AA);
+}
+
+function snapPointToFieldStripe(point, radius = snapRadius) {
+    if (!fieldStripeLines || fieldStripeLines.length === 0)
+        return null;
+
+    let bestPoint = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const line of fieldStripeLines) {
+        const nearest = nearestPointOnSegment(point, line);
+
+        if (nearest.distance < bestDistance) {
+            bestDistance = nearest.distance;
+            bestPoint = nearest.point;
+        }
+    }
+
+    if (bestDistance > radius || !bestPoint)
+        return null;
+
+    return bestPoint;
+}
+
+function nearestPointOnSegment(point, segment) {
+    const ax = segment.x1;
+    const ay = segment.y1;
+    const bx = segment.x2;
+    const by = segment.y2;
+    const abx = bx - ax;
+    const aby = by - ay;
+    const apx = point.x - ax;
+    const apy = point.y - ay;
+    const denom = (abx * abx) + (aby * aby);
+
+    let t = denom > 0 ? ((apx * abx) + (apy * aby)) / denom : 0;
+    t = Math.max(0, Math.min(1, t));
+
+    const x = ax + (abx * t);
+    const y = ay + (aby * t);
+    const dx = point.x - x;
+    const dy = point.y - y;
+
+    return {
+        point: { x, y },
+        distance: Math.hypot(dx, dy)
+    };
 }
